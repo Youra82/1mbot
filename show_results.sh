@@ -18,6 +18,6 @@ else
     exit 1
 fi
 
-python3 "$SCRIPT_DIR/show_results.py"
+python3 "$SCRIPT_DIR/show_results.py" "$@"
 
 deactivate
