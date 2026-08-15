@@ -1,0 +1,10 @@
+# ccxt>=4.4 bewusst neuer als der 4.3.5-Pin der anderen Bots (mbot/ltbbot) --
+# die aeltere Version ist mit aktuellem aiohttp's Websocket-Reader inkompatibel
+# (ccxt.pro schlaegt mit "'WebSocketReader' object has no attribute 'parse_frame'"
+# fehl). Getestet mit ccxt 4.5.73 gegen echte Bitget-Websocket-Daten.
+ccxt>=4.4
+numpy
+pandas==2.1.3
+requests==2.31.0
+pytest
+pytest-asyncio

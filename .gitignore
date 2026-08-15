@@ -1,0 +1,12 @@
+secret.json
+secret.json.bak
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+logs/
+*.log
+artifacts/tracker/*.json
+artifacts/tracker/*.jsonl
+.pytest_cache/
+.DS_Store

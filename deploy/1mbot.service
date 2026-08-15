@@ -1,0 +1,17 @@
+[Unit]
+Description=1mbot - Grid/Market-Making Bot (Bitget)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ANPASSEN: Pfad zum tatsaechlichen Projektverzeichnis auf dem VPS
+WorkingDirectory=/home/REPLACE_ME/botprojekte/1mbot
+ExecStart=/home/REPLACE_ME/botprojekte/1mbot/.venv/bin/python3 run.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/REPLACE_ME/botprojekte/1mbot/logs/service.log
+StandardError=append:/home/REPLACE_ME/botprojekte/1mbot/logs/service.log
+
+[Install]
+WantedBy=multi-user.target

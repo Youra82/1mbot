@@ -1,0 +1,67 @@
+{
+    "live_trading": false,
+
+    "account": {
+        "start_capital_usdt": 10.0
+    },
+
+    "watchlist": [
+        "BTC/USDT:USDT",
+        "ETH/USDT:USDT"
+    ],
+
+    "regime": {
+        "hurst_trend_min": 0.55,
+        "adx_trend_min": 25.0,
+        "hurst_range_max": 0.50,
+        "adx_range_max": 20.0,
+        "entropy_chaos_min": 0.97,
+        "adx_strong_trend_block": 35.0,
+        "hurst_min_lookback": 200
+    },
+    "regime_timeframe": "1m",
+    "regime_refresh_minutes": 1,
+
+    "grid": {
+        "atr_timeframe": "5m",
+        "atr_period": 14,
+        "spacing_atr_mult": 4.5,
+        "levels_per_side": 1,
+        "level_size_usdt": 5.0,
+        "anchor_ma_period": 20,
+
+        "sr_zones": {
+            "enabled": true,
+            "timeframe": "15m",
+            "lookback_days": 14,
+            "swing_window": 3,
+            "tolerance_pct": 0.0015,
+            "min_touches": 2,
+            "refresh_hours": 4
+        },
+
+        "daily_bias": {
+            "enabled": false,
+            "refresh_minutes": 15
+        }
+    },
+
+    "risk": {
+        "leverage": 20,
+        "margin_mode": "isolated",
+        "max_net_inventory_usdt": 10.0,
+        "max_portfolio_inventory_usdt": 20.0,
+        "min_notional_usdt": 5.0,
+        "inventory_skew_max": 0.6
+    },
+
+    "costs": {
+        "maker_fee_pct": 0.02,
+        "taker_fee_pct": 0.06
+    },
+
+    "telegram": {
+        "send_status_updates": true,
+        "status_interval_minutes": 60
+    }
+}
