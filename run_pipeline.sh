@@ -64,7 +64,13 @@ echo "Mindest-Gewinntage-Quote und Mindest-Fills wirken als Gate (Strict-Modus):
 echo "  Ein Trial zaehlt nur, wenn BEIDE Schwellen erreicht werden -- maximiert PnL"
 echo "  ist sonst trivial durch 'praktisch nie handeln' erreichbar (0 Fills = 0 Verlust)."
 read -p "Mindest-Gewinntage-Quote (0-1) [Standard: 0.5]: " MIN_WIN_RATIO; MIN_WIN_RATIO=${MIN_WIN_RATIO:-0.5}
-read -p "Mindest-Fills ueber das gesamte Fenster [Standard: 20]: " MIN_FILLS; MIN_FILLS=${MIN_FILLS:-20}
+read -p "Mindest-Fills ueber das In-Sample-Fenster [Standard: 20]: " MIN_FILLS; MIN_FILLS=${MIN_FILLS:-20}
+
+echo ""
+echo "In-Sample-/Out-of-Sample-Split (wie ltbbot/stbot): Optuna sieht beim Suchen nur"
+echo "  die aeltesten X% der ausgewaehlten Tage -- der Rest (juengste Tage) bestaetigt"
+echo "  danach den besten gefundenen Parametersatz, ohne dass Optuna ihn je gesehen hat."
+read -p "In-Sample-Anteil [Standard: 0.7]: " IS_FRACTION; IS_FRACTION=${IS_FRACTION:-0.7}
 
 # --- Uebernahme ---
 echo ""
@@ -91,6 +97,7 @@ echo -e "${BLUE}=======================================================${NC}"
     --trials "$TRIALS" \
     --min-win-ratio "$MIN_WIN_RATIO" \
     --min-fills "$MIN_FILLS" \
+    --is-fraction "$IS_FRACTION" \
     $APPLY_ARG
 RC=$?
 
