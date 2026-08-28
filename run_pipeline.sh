@@ -74,6 +74,13 @@ read -p "Mindest-Payoff-Ratio [Standard: 1.0]: " MIN_PAYOFF; MIN_PAYOFF=${MIN_PA
 read -p "Hoechst-Payoff-Ratio [Standard: 4.0]: " MAX_PAYOFF; MAX_PAYOFF=${MAX_PAYOFF:-4.0}
 
 echo ""
+echo "Edge-Margin: Mindest-Puffer der TATSAECHLICHEN Gewinntage-Quote UEBER der aus der"
+echo "  realisierten Payoff-Ratio berechneten Breakeven-Quote (sonst koennte ein Trial bei"
+echo "  niedriger Payoff-Ratio genau auf der Breakeven-Linie liegen und trotzdem durchrutschen)."
+read -p "Edge-Margin in Prozentpunkten [Standard: 5]: " EDGE_MARGIN_PP; EDGE_MARGIN_PP=${EDGE_MARGIN_PP:-5}
+EDGE_MARGIN=$("$PYTHON" -c "print($EDGE_MARGIN_PP / 100)")
+
+echo ""
 echo "In-Sample-/Out-of-Sample-Split (wie ltbbot/stbot): Optuna sieht beim Suchen nur"
 echo "  die aeltesten X% der ausgewaehlten Tage -- der Rest (juengste Tage) bestaetigt"
 echo "  danach den besten gefundenen Parametersatz, ohne dass Optuna ihn je gesehen hat."
@@ -107,6 +114,7 @@ echo -e "${BLUE}=======================================================${NC}"
     --is-fraction "$IS_FRACTION" \
     --min-payoff-ratio "$MIN_PAYOFF" \
     --max-payoff-ratio "$MAX_PAYOFF" \
+    --min-edge-margin "$EDGE_MARGIN" \
     $APPLY_ARG
 RC=$?
 

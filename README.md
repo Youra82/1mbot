@@ -235,19 +235,21 @@ python backtest_multiday.py --start 2026-02-01 --end 2026-07-18 --count 20 --exc
 ./run_pipeline.sh
 # oder direkt:
 python optimizer.py --start 2026-08-01 --end 2026-08-28 --count 20 \
-    --trials 60 --min-win-ratio 0.5 --min-fills 20 \
-    --is-fraction 0.7 --min-payoff-ratio 1.0 --max-payoff-ratio 4.0 --apply
+    --trials 60 --min-win-ratio 0.5 --min-fills 20 --is-fraction 0.7 \
+    --min-payoff-ratio 1.0 --max-payoff-ratio 4.0 --min-edge-margin 0.05 --apply
 ```
 
 ### In-Sample / Out-of-Sample-Split
 
-Optuna sieht beim Suchen NUR die aeltesten `--is-fraction` (Standard 70%) der ueber das Fenster verteilten Tage -- die juengsten 30% sieht kein einziger Trial, sie bestaetigen ausschliesslich den am Ende gefundenen besten Parametersatz. Ohne diesen Split waere das Ergebnis reines In-Sample-Rauschen (siehe dnabot-Praezedenzfall: In-Sample-Optimizer +151.2%, echter Walk-Forward -99.5% bis -100%). `--apply` uebernimmt ein Symbol nur, wenn Mindest-Fills, Mindest-Gewinntage-Quote UND Payoff-Ratio-Gate **sowohl in-sample als auch out-of-sample** greifen.
+Optuna sieht beim Suchen NUR die aeltesten `--is-fraction` (Standard 70%) der ueber das Fenster verteilten Tage -- die juengsten 30% sieht kein einziger Trial, sie bestaetigen ausschliesslich den am Ende gefundenen besten Parametersatz. Ohne diesen Split waere das Ergebnis reines In-Sample-Rauschen (siehe dnabot-Praezedenzfall: In-Sample-Optimizer +151.2%, echter Walk-Forward -99.5% bis -100%). `--apply` uebernimmt ein Symbol nur, wenn Mindest-Fills, Mindest-Gewinntage-Quote, Payoff-Ratio-Gate UND Edge-Margin **sowohl in-sample als auch out-of-sample** greifen.
 
 ![In-Sample/Out-of-Sample-Split](docs/concept_is_oos.png)
 
-### Payoff-Ratio-Gate
+### Payoff-Ratio-Gate + Edge-Margin
 
 `total_pnl > 0` allein reicht nicht als Qualitaetsmerkmal -- ein Parametersatz kann durch ein einziges dominantes Fill-Ereignis profitabel aussehen, obwohl das zugrundeliegende Verhaeltnis aus Gewinnern/Verlierern fragil ist. `--min-payoff-ratio`/`--max-payoff-ratio` (Standard 1.0/4.0) lehnen Trials in den "Avoid Extreme"-Zonen der Breakeven-Winrate-Kurve ab, unabhaengig vom PnL. `payoff_ratio` bleibt unbestraft, wenn im Fenster schlicht keine Verlust-Fills vorkamen (zu wenig Datenpunkte fuer die Kennzahl, keine "extreme" Ratio).
+
+`--min-win-ratio` allein reicht als Schwelle nicht: sie ist FEST, unabhaengig vom Payoff-Ratio -- bei `payoff_ratio=1.0` liegt die Breakeven-Quote aber bei genau 50%, deckungsgleich mit dem Standard-`min-win-ratio=0.5`, also ganz ohne Puffer. `--min-edge-margin` (Standard 0.05, also 5 Prozentpunkte) verlangt stattdessen einen Mindest-Abstand zur TATSAECHLICHEN, aus dem realisierten Payoff-Ratio berechneten Breakeven-Linie.
 
 ![Payoff-Ratio-Gate](docs/concept_payoff_ratio.png)
 

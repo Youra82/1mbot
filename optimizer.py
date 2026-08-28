@@ -15,8 +15,10 @@ Zielfunktion ("Strict"-Modus, analog zu ltbbot/stbot): maximiert den Gesamt-
 PnL ueber ein Multi-Day-Backtest-Fenster (siehe backtest_multiday.py), aber
 nur Trials, die zusaetzlich
   (a) eine Mindest-Gewinntage-Quote,
-  (b) eine Mindest-Fill-Zahl und
-  (c) eine Payoff-Ratio (Avg-Win/Avg-Loss) innerhalb [min_payoff_ratio, max_payoff_ratio]
+  (b) eine Mindest-Fill-Zahl,
+  (c) eine Payoff-Ratio (Avg-Win/Avg-Loss) innerhalb [min_payoff_ratio, max_payoff_ratio] und
+  (d) einen Mindest-Puffer (min_edge_margin) UEBER der aus der REALISIERTEN
+      Payoff-Ratio berechneten Breakeven-Gewinntage-Quote
 erreichen, gelten als gueltig. Ohne (b) waere ein spacing_atr_mult, das so
 hoch ist, dass praktisch nie gehandelt wird, ein triviales "perfektes"
 0-Fills/0-Verlust-Optimum -- nicht das, was hier gesucht wird (vgl.
@@ -30,7 +32,13 @@ Parametersaetze heraus, die nur durch ein fragiles Verhaeltnis aus vielen
 kleinen Gewinnern/wenigen grossen Verlierern (oder umgekehrt) profitabel
 aussehen -- payoff_ratio=None (keine Verlust-Fills im Fenster) wird NICHT
 bestraft, das ist zu wenig Datenpunkte fuer die Kennzahl, keine "extreme"
-Ratio.
+Ratio. (d) schliesst eine Luecke von (a)+(c): min_win_ratio ist ein FESTER
+Floor unabhaengig vom Payoff-Ratio, bei payoff_ratio=1.0 liegt die Breakeven-
+Quote aber bei genau 50% -- deckungsgleich mit dem Standard-min_win_ratio=0.5,
+also ganz ohne Puffer. --min-edge-margin (Standard 0.05) verlangt stattdessen
+einen Mindest-Abstand zur TATSAECHLICHEN, aus der realisierten Payoff-Ratio
+berechneten Breakeven-Linie, statt zwei unabhaengige Schwellen, die beide
+gleichzeitig nur hauchduenn erfuellt sein koennten.
 
 IN-SAMPLE / OUT-OF-SAMPLE-SPLIT (wie ltbbot/stbot, --is-fraction, Standard
 70/30): Optuna sieht beim Suchen NUR die aeltesten `is_fraction` der ueber
@@ -252,7 +260,8 @@ async def run_scored_backtest(symbol: str, base_settings: dict, grid_cfg: dict, 
 async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_client,
                     is_days: list[datetime], fill_timeframe: str,
                     min_win_ratio: float, min_fills: int,
-                    min_payoff_ratio: float, max_payoff_ratio: float) -> float:
+                    min_payoff_ratio: float, max_payoff_ratio: float,
+                    min_edge_margin: float) -> float:
     grid_cfg = suggest_grid_cfg(trial, base_settings["grid"])
     metrics = await run_scored_backtest(
         symbol, base_settings, grid_cfg, rest_client, is_days, fill_timeframe,
@@ -279,6 +288,16 @@ async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_c
             violation += (min_payoff_ratio - payoff_ratio) * 10
         elif payoff_ratio > max_payoff_ratio:
             violation += (payoff_ratio - max_payoff_ratio) * 10
+        # Edge-Margin: min_win_ratio ist ein FESTER Floor, unabhaengig vom Payoff-Ratio --
+        # bei payoff_ratio=1.0 liegt die Breakeven-Quote bei genau 50%, deckungsgleich mit
+        # dem Standard-min_win_ratio=0.5, also OHNE jeden Puffer. Diese zusaetzliche Pruefung
+        # verlangt, dass die tatsaechliche Quote die aus dem REALISIERTEN Payoff-Ratio
+        # berechnete Breakeven-Quote um min_edge_margin uebertrifft, statt zwei unabhaengige
+        # Schwellen, die beide gleichzeitig nur hauchduenn erfuellt sein koennen.
+        breakeven = 1.0 / (1.0 + payoff_ratio)
+        required = breakeven + min_edge_margin
+        if win_ratio < required:
+            violation += (required - win_ratio) * 100
 
     if violation > 0:
         return -1000.0 - violation
@@ -286,10 +305,17 @@ async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_c
 
 
 def is_feasible(metrics: dict, min_fills: int, min_win_ratio: float,
-                 min_payoff_ratio: float = 0.0, max_payoff_ratio: float = float("inf")) -> bool:
+                 min_payoff_ratio: float = 0.0, max_payoff_ratio: float = float("inf"),
+                 min_edge_margin: float = 0.0) -> bool:
     payoff_ratio = metrics.get("payoff_ratio")
     payoff_ok = payoff_ratio is None or min_payoff_ratio <= payoff_ratio <= max_payoff_ratio
-    return metrics["total_fills"] >= min_fills and metrics["win_ratio"] >= min_win_ratio and payoff_ok
+    if payoff_ratio is not None:
+        breakeven = 1.0 / (1.0 + payoff_ratio)
+        margin_ok = metrics["win_ratio"] >= breakeven + min_edge_margin
+    else:
+        margin_ok = True
+    return (metrics["total_fills"] >= min_fills and metrics["win_ratio"] >= min_win_ratio
+            and payoff_ok and margin_ok)
 
 
 def _fmt_payoff(payoff_ratio: float | None) -> str:
@@ -305,7 +331,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         return asyncio.run(evaluate(
             trial, symbol, base_settings, rest_client,
             is_days, args.fill_timeframe, args.min_win_ratio, args.min_fills,
-            args.min_payoff_ratio, args.max_payoff_ratio,
+            args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin,
         ))
 
     def report_progress(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
@@ -313,7 +339,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
         # genau die Frage, die beim ersten echten Testlauf aufkam.
         feasible = is_feasible(trial.user_attrs, args.min_fills, args.min_win_ratio,
-                                args.min_payoff_ratio, args.max_payoff_ratio)
+                                args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
         dur = trial.duration.total_seconds() if trial.duration is not None else None
         dur_str = f"{dur:.1f}s" if dur is not None else "?"
@@ -348,7 +374,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         ledger_prefix=f"oos_{symbol.replace('/', '_').replace(':', '_')}",
     ))
     oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio,
-                          args.min_payoff_ratio, args.max_payoff_ratio)
+                          args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin)
     rest_client.ticker.print_line(
         f"  OOS-Ergebnis [{'OK' if oos_ok else 'GATE VERFEHLT'}]: PnL={oos_metrics['total_pnl']:+.4f} USDT, "
         f"Fills={oos_metrics['total_fills']} (Mindest: {min_oos_fills}), "
@@ -360,7 +386,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
 
 def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTrial, dict]], min_fills: int,
                    min_win_ratio: float, min_oos_fills: int,
-                   min_payoff_ratio: float, max_payoff_ratio: float) -> None:
+                   min_payoff_ratio: float, max_payoff_ratio: float, min_edge_margin: float) -> None:
     overrides = settings.setdefault("per_symbol_overrides", {})
     applied, skipped = [], []
     for symbol, (best, oos_metrics) in results.items():
@@ -368,8 +394,8 @@ def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTr
         # gut aussieht, ist per Definition dieses Skripts genau das
         # In-Sample-Rauschen, das der OOS-Split verhindern soll (siehe
         # Modul-Docstring, dnabot-Praezedenzfall).
-        if not (is_feasible(best.user_attrs, min_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio)
-                and is_feasible(oos_metrics, min_oos_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio)):
+        if not (is_feasible(best.user_attrs, min_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio, min_edge_margin)
+                and is_feasible(oos_metrics, min_oos_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio, min_edge_margin)):
             skipped.append(symbol)
             continue
         overrides[symbol] = {"grid": params_to_grid_cfg(settings["grid"], best.params)}
@@ -380,8 +406,9 @@ def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTr
     if applied:
         print(f"\n[OK] settings.json aktualisiert -- per_symbol_overrides fuer: {', '.join(applied)}")
     if skipped:
-        print(f"[!] IS-, OOS- oder Payoff-Ratio-Gate verfehlt (min_fills={min_fills}, min_oos_fills={min_oos_fills}, "
-              f"min_win_ratio={min_win_ratio}, payoff_ratio=[{min_payoff_ratio}, {max_payoff_ratio}]) -- "
+        print(f"[!] IS-, OOS-, Payoff-Ratio- oder Edge-Margin-Gate verfehlt (min_fills={min_fills}, "
+              f"min_oos_fills={min_oos_fills}, min_win_ratio={min_win_ratio}, "
+              f"payoff_ratio=[{min_payoff_ratio}, {max_payoff_ratio}], min_edge_margin={min_edge_margin}) -- "
               f"NICHT uebernommen, laeuft weiter mit dem globalen grid-Block: {', '.join(skipped)}")
 
 
@@ -406,6 +433,11 @@ def main() -> None:
     parser.add_argument("--max-payoff-ratio", type=float, default=4.0,
                          help="Hoechst-Payoff-Ratio -- darueber gilt der Trial ebenfalls als 'Avoid Extreme'-Zone "
                               "(unrealistisch wenige, grosse Gewinner sind meist Ueberfitting) (Standard: 4.0)")
+    parser.add_argument("--min-edge-margin", type=float, default=0.05,
+                         help="Mindest-Puffer (0-1) der tatsaechlichen Gewinntage-Quote UEBER der aus dem "
+                              "realisierten Payoff-Ratio berechneten Breakeven-Quote -- ohne diesen Puffer koennte "
+                              "ein Trial bei niedriger Payoff-Ratio genau auf der Breakeven-Linie liegen und trotzdem "
+                              "--min-win-ratio erfuellen (Standard: 0.05, also 5 Prozentpunkte)")
     parser.add_argument("--exchange", default="bitget", choices=list(EXCHANGE_OPTIONS.keys()),
                          help="Exchange fuer den historischen OHLCV-Abruf (Standard: bitget)")
     parser.add_argument("--apply", action="store_true",
@@ -449,6 +481,8 @@ def main() -> None:
           f"(juengste, min_oos_fills={min_oos_fills})")
     print(f"    Payoff-Ratio-Gate: [{args.min_payoff_ratio}, {args.max_payoff_ratio}] "
           f"(Avg-Win/Avg-Loss, Breakeven-Kurve 'Avoid Extreme'-Zonen)")
+    print(f"    Edge-Margin: +{args.min_edge_margin*100:.1f} Prozentpunkte ueber der "
+          f"Payoff-Ratio-Breakeven-Quote gefordert")
 
     results: dict[str, tuple[optuna.trial.FrozenTrial, dict]] = {}
     ticker.start()
@@ -460,9 +494,9 @@ def main() -> None:
     print("\n=== Zusammenfassung ===")
     for symbol, (best, oos_metrics) in results.items():
         is_ok = is_feasible(best.user_attrs, args.min_fills, args.min_win_ratio,
-                             args.min_payoff_ratio, args.max_payoff_ratio)
+                             args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin)
         oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio,
-                              args.min_payoff_ratio, args.max_payoff_ratio)
+                              args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin)
         flag = "OK" if (is_ok and oos_ok) else ("OOS GATE VERFEHLT" if is_ok else "IS GATE VERFEHLT")
         print(f"  {symbol:<20} IS-PnL={best.user_attrs['total_pnl']:+.4f} USDT  "
               f"OOS-PnL={oos_metrics['total_pnl']:+.4f} USDT  "
@@ -470,7 +504,7 @@ def main() -> None:
 
     if args.apply:
         apply_results(settings, results, args.min_fills, args.min_win_ratio, min_oos_fills,
-                       args.min_payoff_ratio, args.max_payoff_ratio)
+                       args.min_payoff_ratio, args.max_payoff_ratio, args.min_edge_margin)
     else:
         print("\n(--apply nicht gesetzt: settings.json wurde NICHT veraendert.)")
 
