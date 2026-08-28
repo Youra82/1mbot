@@ -9,7 +9,7 @@
 
 **Ein 1-Minuten-High-Frequency-Grid-Bot fuer Bitget: schoepft Mikrostruktur-Rauschen per Market-Making ab, statt auf Richtung zu wetten**
 
-[Features](#-features) • [Installation](#-installation) • [Konfiguration](#-konfiguration) • [Dry-Run](#-dry-run-betrieb) • [Backtesting](#-backtesting) • [Monitoring](#-monitoring--status) • [Kalibrierung](#-kalibrierung--ergebnisse) • [Wartung](#-wartung)
+[Features](#-features) • [Installation](#-installation) • [Konfiguration](#-konfiguration) • [Dry-Run](#-dry-run-betrieb) • [Backtesting](#-backtesting) • [Training](#-training--parameter-optimierung) • [Monitoring](#-monitoring--status) • [Kalibrierung](#-kalibrierung--ergebnisse) • [Wartung](#-wartung)
 
 </div>
 
@@ -44,6 +44,8 @@ flowchart LR
     A --> B --> C --> D --> E --> F
 ```
 
+![Grid-Mechanik](docs/concept_grid_mechanics.png)
+
 ---
 
 ## 🚀 Features
@@ -62,9 +64,10 @@ flowchart LR
 - ✅ Simulierter Paper-Broker mit FIFO-Lot-PnL-Matching + Maker-Fee
 - ✅ Zeitraum-Backtest (`backtest_replay.py`) und Multi-Day-Backtest ueber verteilte Einzeltage (`backtest_multiday.py`)
 - ✅ Cross-Exchange-Backtest-Check (`--exchange binance`) fuer Zeitraeume jenseits von Bitgets ~28-Tage-1-Minuten-Retention
-- ✅ Live/Backtest teilen sich dieselbe Grid-/Regime-Logik (`SymbolWorker`) -- keine zweite, potenziell abweichende Implementierung
+- ✅ Optuna-Parameter-Optimierung pro Symbol (`optimizer.py`/`run_pipeline.sh`) mit In-Sample-/Out-of-Sample-Split und Payoff-Ratio-Gate (siehe [Training](#-training--parameter-optimierung))
+- ✅ Live/Backtest/Optimizer teilen sich dieselbe Grid-/Regime-Logik (`SymbolWorker`) -- keine zweite, potenziell abweichende Implementierung
 - ✅ Theoretischer Kontostand live abrufbar (Startkapital + realisierter + unrealisierter PnL)
-- ✅ 82 Unit-Tests
+- ✅ 89 Unit-Tests
 
 ---
 
@@ -224,21 +227,43 @@ python backtest_multiday.py --start 2026-02-01 --end 2026-07-18 --count 20 --exc
 
 ---
 
-## 📊 Monitoring & Status
+## 🧪 Training / Parameter-Optimierung
 
-### Einmal-Status (Kontostand + Snapshot + Equity-Verlauf)
+`run_pipeline.sh` (interaktiv) bzw. `optimizer.py` (CLI) suchen per Optuna pro Symbol die besten Grid-Parameter (`spacing_atr_mult`, `levels_per_side`, `sr_zones.*`) und schreiben das Ergebnis als `per_symbol_overrides`-Eintrag direkt in `settings.json` -- kein separates Config-Dateien-System wie bei den candle-backtest-basierten Bots im Repo, da `symbol_settings.py::resolve_symbol_settings()` denselben Override sowohl live als auch im Backtest aufloest.
+
+```bash
+./run_pipeline.sh
+# oder direkt:
+python optimizer.py --start 2026-08-01 --end 2026-08-28 --count 20 \
+    --trials 60 --min-win-ratio 0.5 --min-fills 20 \
+    --is-fraction 0.7 --min-payoff-ratio 1.0 --max-payoff-ratio 4.0 --apply
+```
+
+### In-Sample / Out-of-Sample-Split
+
+Optuna sieht beim Suchen NUR die aeltesten `--is-fraction` (Standard 70%) der ueber das Fenster verteilten Tage -- die juengsten 30% sieht kein einziger Trial, sie bestaetigen ausschliesslich den am Ende gefundenen besten Parametersatz. Ohne diesen Split waere das Ergebnis reines In-Sample-Rauschen (siehe dnabot-Praezedenzfall: In-Sample-Optimizer +151.2%, echter Walk-Forward -99.5% bis -100%). `--apply` uebernimmt ein Symbol nur, wenn Mindest-Fills, Mindest-Gewinntage-Quote UND Payoff-Ratio-Gate **sowohl in-sample als auch out-of-sample** greifen.
+
+![In-Sample/Out-of-Sample-Split](docs/concept_is_oos.png)
+
+### Payoff-Ratio-Gate
+
+`total_pnl > 0` allein reicht nicht als Qualitaetsmerkmal -- ein Parametersatz kann durch ein einziges dominantes Fill-Ereignis profitabel aussehen, obwohl das zugrundeliegende Verhaeltnis aus Gewinnern/Verlierern fragil ist. `--min-payoff-ratio`/`--max-payoff-ratio` (Standard 1.0/4.0) lehnen Trials in den "Avoid Extreme"-Zonen der Breakeven-Winrate-Kurve ab, unabhaengig vom PnL. `payoff_ratio` bleibt unbestraft, wenn im Fenster schlicht keine Verlust-Fills vorkamen (zu wenig Datenpunkte fuer die Kennzahl, keine "extreme" Ratio).
+
+![Payoff-Ratio-Gate](docs/concept_payoff_ratio.png)
+
+---
+
+## 📊 Monitoring & Status
 
 ```bash
 ./show_results.sh
 ```
 
-### Live-Ansicht (fuer den Dauerbetrieb auf VPS/Mini-PC)
-
-```bash
-./show_results.sh --watch 10
-```
-
-Aktualisiert den theoretischen Kontostand alle 10 Sekunden im Terminal -- Startkapital + realisierter PnL (abgeschlossene Trades) + unrealisierter PnL (Mark-to-Market der offenen Positionen). Einfach in einer SSH-Session offen lassen.
+Interaktives Modus-Menue:
+1. **Status-Snapshot** -- Kontostand + Aktueller Stand + Equity-Verlauf, einmalig
+2. **Live-Watch** -- aktualisiert den theoretischen Kontostand fortlaufend im Terminal (Startkapital + realisierter + unrealisierter PnL), fuer den Dauerbetrieb auf VPS/Mini-PC in einer offenen SSH-Session
+3. **Zeitraum-Backtest** -- ruft `backtest_replay.py` mit abgefragten Parametern auf
+4. **Multi-Day-Backtest** -- ruft `backtest_multiday.py` mit abgefragten Parametern auf (inkl. Cross-Exchange-Option)
 
 ### Log-Files
 
@@ -306,13 +331,17 @@ Sichert `secret.json`, holt den neuesten Stand per `git reset --hard origin/main
 │   │   └── sr_zones.py      # Swing-Point-Erkennung/Clustering
 │   ├── risk/                # Inventory-/Portfolio-Cap
 │   ├── exchange/            # Bitget REST/Websocket-Clients
-│   └── utils/                # Ledger, Report, State, Telegram, Timeframes
-├── tests/                   # 82 Unit-Tests
+│   └── utils/                # Ledger, Report (inkl. Payoff-Ratio), State, Symbol-Settings, Telegram, Timeframes
+├── tests/                   # 89 Unit-Tests
+├── docs/                    # Konzept-Illustrationen fuer dieses README
 ├── deploy/1mbot.service     # systemd-Unit
 ├── run.py                   # Live-Dry-Run Entry Point
 ├── backtest_replay.py       # Zeitraum-Backtest
 ├── backtest_multiday.py     # Multi-Day-Backtest (+ Cross-Exchange)
+├── optimizer.py             # Optuna-Parameter-Optimierung pro Symbol (IS/OOS-Split, Payoff-Ratio-Gate)
+├── run_pipeline.sh          # Interaktiver Wrapper um optimizer.py
 ├── show_results.py          # Status/Kontostand (+ --watch)
+├── show_results.sh          # Modus-Menue (Status/Watch/Zeitraum-Backtest/Multi-Day-Backtest)
 ├── settings.json
 └── secret.json.example
 ```
@@ -349,6 +378,7 @@ Sichert `secret.json`, holt den neuesten Stand per `git reset --hard origin/main
 Entwickelt mit:
 - [CCXT / CCXT Pro](https://github.com/ccxt/ccxt)
 - [Pandas](https://pandas.pydata.org/) / [NumPy](https://numpy.org/)
+- [Optuna](https://optuna.org/) fuer die Parameter-Optimierung
 - [pytest](https://pytest.org/)
 
 Regime-Gate portiert aus dem `superbot`-Projekt (dort wiederum Synthese aus vier unabhaengig entstandenen Ansaetzen im selben Bot-Portfolio).
