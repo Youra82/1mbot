@@ -52,7 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 import optuna  # noqa: E402
 
 from backtest_multiday import EXCHANGE_OPTIONS, run_multiday  # noqa: E402
-from onembot.exchange.rest_client import RestClient, print_invalid_symbols  # noqa: E402
+from onembot.exchange.rest_client import RestClient, normalize_symbol, print_invalid_symbols  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 
@@ -199,7 +199,7 @@ def main() -> None:
     args.end_date = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
     settings = load_json(ROOT / "settings.json")
-    watchlist = args.symbols or settings["watchlist"]
+    watchlist = [normalize_symbol(s) for s in args.symbols] if args.symbols else settings["watchlist"]
     rest_client = CachingRestClient(
         RestClient(None, exchange_id=args.exchange, exchange_options=EXCHANGE_OPTIONS.get(args.exchange))
     )

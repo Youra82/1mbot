@@ -21,6 +21,20 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def normalize_symbol(symbol: str) -> str:
+    """
+    Erlaubt kurze Ticker-Eingaben wie bei den anderen Bots im Repo (z.B.
+    ltbbot: 'BTC ETH DOGE' statt voller ccxt-Symbole) -- 'ETH' wird zu
+    'ETH/USDT:USDT' (USDT-M-Perpetual, das einzige, was 1mbot handelt).
+    Ein Symbol, das bereits ein '/' enthaelt, gilt als vollstaendig
+    qualifiziert und bleibt unveraendert (nur Whitespace/Case normalisiert).
+    """
+    symbol = symbol.strip()
+    if "/" in symbol:
+        return symbol.upper()
+    return f"{symbol.upper()}/USDT:USDT"
+
+
 def print_invalid_symbols(invalid: dict[str, list[str]], exchange_id: str) -> None:
     """Gemeinsames Fehlerbild fuer optimizer.py/backtest_multiday.py/backtest_replay.py,
     siehe RestClient.validate_symbols()."""

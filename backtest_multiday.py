@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from onembot.exchange.rest_client import RestClient, print_invalid_symbols  # noqa: E402
+from onembot.exchange.rest_client import RestClient, normalize_symbol, print_invalid_symbols  # noqa: E402
 from onembot.replay import replay_symbol  # noqa: E402
 from onembot.utils.ledger import FillLedger  # noqa: E402
 from onembot.utils.report import build_report  # noqa: E402
@@ -98,7 +98,7 @@ async def main(start_str: str, end_str: str, count: int, fill_timeframe: str, sy
                 exchange_id: str) -> None:
     settings = load_json(ROOT / "settings.json")
     rest_client = RestClient(None, exchange_id=exchange_id, exchange_options=EXCHANGE_OPTIONS.get(exchange_id))
-    watchlist = symbols or settings["watchlist"]
+    watchlist = [normalize_symbol(s) for s in symbols] if symbols else settings["watchlist"]
 
     invalid = rest_client.validate_symbols(watchlist)
     if invalid:

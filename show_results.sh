@@ -46,7 +46,7 @@ case "$MODE" in
         echo ""
         read -p "Anzahl Tage rückwirkend [Standard: 3]: " DAYS; DAYS=${DAYS:-3}
         read -p "Fill-Timeframe für die Näherung [Standard: 5m]: " FILL_TF; FILL_TF=${FILL_TF:-5m}
-        read -p "Symbol(e) [leer = Watchlist aus settings.json]: " SYMBOLS
+        read -p "Symbol(e), ohne /USDT:USDT (z.B. BTC ETH) [leer = Watchlist aus settings.json]: " SYMBOLS
         SYMBOLS_ARGS=""
         [ -n "$SYMBOLS" ] && SYMBOLS_ARGS="--symbols $SYMBOLS"
         echo ""
@@ -61,7 +61,7 @@ case "$MODE" in
         read -p "Ende (JJJJ-MM-TT) [Standard: $TODAY]: " END_DATE; END_DATE=${END_DATE:-$TODAY}
         read -p "Anzahl gleichmäßig verteilter Tage [Standard: 20]: " COUNT; COUNT=${COUNT:-20}
         read -p "Fill-Timeframe für die Näherung [Standard: 1m]: " FILL_TF; FILL_TF=${FILL_TF:-1m}
-        read -p "Symbol(e) [leer = Watchlist aus settings.json]: " SYMBOLS
+        read -p "Symbol(e), ohne /USDT:USDT (z.B. BTC ETH) [leer = Watchlist aus settings.json]: " SYMBOLS
         SYMBOLS_ARGS=""
         [ -n "$SYMBOLS" ] && SYMBOLS_ARGS="--symbols $SYMBOLS"
         echo ""

@@ -33,7 +33,7 @@ echo -e "${BLUE}=======================================================${NC}"
 
 # --- Symbole ---
 echo ""
-read -p "Symbol(e) eingeben (z.B. BTC/USDT:USDT ETH/USDT:USDT) [leer=Watchlist aus settings.json]: " SYMBOLS
+read -p "Symbol(e) eingeben (ohne /USDT:USDT, z.B. BTC ETH) [leer=Watchlist aus settings.json]: " SYMBOLS
 SYMBOLS_ARGS=""
 if [ -n "$SYMBOLS" ]; then
     SYMBOLS_ARGS="--symbols $SYMBOLS"
