@@ -222,11 +222,14 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         feasible = (trial.user_attrs.get("total_fills", 0) >= args.min_fills
                     and trial.user_attrs.get("win_ratio", 0.0) >= args.min_win_ratio)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
+        dur = trial.duration.total_seconds() if trial.duration is not None else None
+        dur_str = f"{dur:.1f}s" if dur is not None else "?"
         rest_client.ticker.print_line(
             f"  [{trial.number + 1}/{args.trials}] PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
             f"Fills={trial.user_attrs.get('total_fills', 0)}  "
             f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
-            f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)"
+            f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)  "
+            f"-- Dauer: {dur_str}"
         )
 
     rest_client.ticker.print_line(
