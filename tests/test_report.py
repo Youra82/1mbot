@@ -94,6 +94,37 @@ def test_payoff_ratio_zero_without_wins():
     assert report.payoff_ratio == pytest.approx(0.0)
 
 
+def test_max_win_share_low_for_many_similar_wins():
+    # Viele aehnlich grosse Gewinner + ein kleiner Verlierer -- ein einzelner
+    # Fill dominiert die Gewinnsumme NICHT, max_win_share bleibt klein.
+    fills = [_fill("X", 1.0, f"t{i}") for i in range(10)] + [_fill("X", -1.0, "t_loss")]
+    report = build_report(fills)
+    assert report.max_win_usdt == pytest.approx(1.0)
+    assert report.max_win_share == pytest.approx(0.1)  # 1.0 / 10.0
+
+
+def test_max_win_share_high_for_single_dominant_win():
+    # Ein einzelner riesiger Gewinner dominiert die gesamte Gewinnsumme --
+    # genau die Situation, die die Payoff-Ratio allein nicht von "viele
+    # gleichmaessige Gewinner" unterscheiden kann (siehe EquityReport-Docstring).
+    fills = [_fill("X", 0.1, f"t{i}") for i in range(5)] + [_fill("X", 50.0, "t_big")] + [_fill("X", -1.0, "t_loss")]
+    report = build_report(fills)
+    assert report.max_win_usdt == pytest.approx(50.0)
+    assert report.max_win_share == pytest.approx(50.0 / 50.5)
+
+
+def test_max_win_share_zero_without_wins():
+    fills = [_fill("X", -1.0, "t1")]
+    report = build_report(fills)
+    assert report.max_win_share == 0.0
+
+
+def test_max_loss_usdt_tracks_largest_single_loss():
+    fills = [_fill("X", 5.0, "t1"), _fill("X", -1.0, "t2"), _fill("X", -4.0, "t3"), _fill("X", -2.0, "t4")]
+    report = build_report(fills)
+    assert report.max_loss_usdt == pytest.approx(4.0)
+
+
 def test_build_report_empty_win_loss_fields_default_to_zero():
     report = build_report([])
     assert report.win_count == 0

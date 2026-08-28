@@ -250,10 +250,20 @@ async def run_scored_backtest(symbol: str, base_settings: dict, grid_cfg: dict, 
     avg_win = total_win / win_count if win_count else 0.0
     avg_loss = total_loss / loss_count if loss_count else 0.0
     payoff_ratio = (avg_win / avg_loss) if avg_loss > 0 else None
+    # max(...) ueber die Tages-Maxima statt Summe: der groesste Fill im gesamten
+    # Fenster, nicht die Summe der Tages-Maxima. Unterscheidet "viele Fills mit
+    # aehnlich erhoehter Payoff-Ratio" (max_win_share klein) von "ein einzelner
+    # dominanter Fill erklaert die ganze Ratio" (max_win_share nahe 1) -- siehe
+    # EquityReport.max_win_share-Docstring. Wichtig fuer Symbole wie DOGE, wo
+    # eine hohe Payoff-Ratio genauso gut eine echte Volatilitaets-Eigenschaft
+    # sein kann statt eines Ueberfitting-Artefakts.
+    max_win = max((r.max_win_usdt for _, r in day_results), default=0.0)
+    max_win_share = (max_win / total_win) if total_win > 0 else 0.0
 
     return {
         "total_pnl": total_pnl, "total_fills": total_fills, "win_ratio": win_ratio,
-        "payoff_ratio": payoff_ratio,
+        "payoff_ratio": payoff_ratio, "win_count": win_count, "loss_count": loss_count,
+        "max_win_share": max_win_share,
     }
 
 
@@ -276,6 +286,9 @@ async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_c
     trial.set_user_attr("total_fills", total_fills)
     trial.set_user_attr("win_ratio", win_ratio)
     trial.set_user_attr("payoff_ratio", payoff_ratio)
+    trial.set_user_attr("win_count", metrics["win_count"])
+    trial.set_user_attr("loss_count", metrics["loss_count"])
+    trial.set_user_attr("max_win_share", metrics["max_win_share"])
 
     violation = max(0, min_fills - total_fills) + max(0.0, min_win_ratio - win_ratio) * 100
     # payoff_ratio=None (keine Verlust-Fills im Fenster) wird NICHT bestraft --
@@ -322,6 +335,17 @@ def _fmt_payoff(payoff_ratio: float | None) -> str:
     return f"{payoff_ratio:.2f}" if payoff_ratio is not None else "n/a (keine Verluste)"
 
 
+def _fmt_concentration(metrics: dict) -> str:
+    """Stichprobengroesse + Konzentration hinter einer Payoff-Ratio, damit sich
+    z.B. 'DOGE ist strukturell volatiler' (viele Wins, kein einzelner dominiert)
+    von 'ein einziger Ausreisser-Fill traegt die Ratio' (wenige Wins, hoher
+    max_win_share) unterscheiden laesst -- die Ratio allein zeigt das nicht."""
+    wins = metrics.get("win_count", 0)
+    losses = metrics.get("loss_count", 0)
+    share = metrics.get("max_win_share", 0.0)
+    return f"Wins/Losses={wins}/{losses}, groesster Einzelgewinn={share*100:.0f}% der Gewinnsumme"
+
+
 def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argparse.Namespace,
                       is_days: list[datetime], oos_days: list[datetime],
                       min_oos_fills: int) -> tuple[optuna.trial.FrozenTrial, dict]:
@@ -365,6 +389,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%, "
         f"Payoff-Ratio={_fmt_payoff(best.user_attrs.get('payoff_ratio'))}"
     )
+    rest_client.ticker.print_line(f"    ({_fmt_concentration(best.user_attrs)})")
     rest_client.ticker.print_line(f"  Params: {best.params}")
     rest_client.ticker.print_line("  Bestaetige auf Out-of-Sample-Tagen (von Optuna nie gesehen)...")
 
@@ -381,6 +406,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         f"Gewinntage-Quote={oos_metrics['win_ratio']*100:.1f}%, "
         f"Payoff-Ratio={_fmt_payoff(oos_metrics.get('payoff_ratio'))}"
     )
+    rest_client.ticker.print_line(f"    ({_fmt_concentration(oos_metrics)})")
     return best, oos_metrics
 
 
@@ -501,6 +527,8 @@ def main() -> None:
         print(f"  {symbol:<20} IS-PnL={best.user_attrs['total_pnl']:+.4f} USDT  "
               f"OOS-PnL={oos_metrics['total_pnl']:+.4f} USDT  "
               f"IS-Payoff={_fmt_payoff(best.user_attrs.get('payoff_ratio'))}  [{flag}]")
+        print(f"    IS: {_fmt_concentration(best.user_attrs)}")
+        print(f"    OOS: {_fmt_concentration(oos_metrics)}")
 
     if args.apply:
         apply_results(settings, results, args.min_fills, args.min_win_ratio, min_oos_fills,
