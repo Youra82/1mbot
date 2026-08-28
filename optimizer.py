@@ -23,6 +23,18 @@ Erfahrung aus anderen Bots im Repo: bei zu wenig Signalen zuerst die
 Trade-Menge fixen, nicht die Profitabilitaet auf Basis von ~0 Trades
 bewerten).
 
+IN-SAMPLE / OUT-OF-SAMPLE-SPLIT (wie ltbbot/stbot, --is-fraction, Standard
+70/30): Optuna sieht beim Suchen NUR die aeltesten `is_fraction` der ueber
+das Fenster verteilten Tage. Die juengsten (1-is_fraction) Tage sieht kein
+einziger Trial waehrend der Suche -- sie dienen ausschliesslich der
+Bestaetigung des am Ende gefundenen besten Parametersatzes. Ohne das waere
+das Ergebnis reines In-Sample-Rauschen und nicht vertrauenswuerdig zu
+bewerten (siehe dnabot: ein echter Walk-Forward-Test zeigte dort PnL -99.5%
+bis -100% ueber ALLE Lookbacks, obwohl der reine In-Sample-Optimizer-Lauf
++151.2% zeigte -- Auto-Optimizer-Ergebnisse ohne OOS-Bestaetigung sind
+strukturell nicht von Zufall zu unterscheiden). --apply uebernimmt ein
+Symbol nur, wenn die Gates BEIDE Male greifen -- in-sample UND out-of-sample.
+
 Sucht NUR ueber Parameter, die den benoetigten historischen Warmup-Zeitraum
 NICHT veraendern (spacing_atr_mult, levels_per_side, sr_zones.*) -- atr_period,
 anchor_ma_period und sr_zones.lookback_days bleiben pro Symbol fix. Dadurch
@@ -34,7 +46,7 @@ komplett neu abgerufene Historie pro Symbol.
 
 Benutzung (typischerweise ueber run_pipeline.sh):
     python optimizer.py --start 2026-07-19 --end 2026-08-14 --count 20 \
-        --trials 60 --min-win-ratio 0.5 --min-fills 20 --apply
+        --trials 60 --min-win-ratio 0.5 --min-fills 20 --is-fraction 0.7 --apply
 """
 from __future__ import annotations
 
@@ -60,7 +72,7 @@ sys.stdout.reconfigure(line_buffering=True)
 
 import optuna  # noqa: E402
 
-from backtest_multiday import EXCHANGE_OPTIONS, run_multiday  # noqa: E402
+from backtest_multiday import EXCHANGE_OPTIONS, pick_days, run_multiday  # noqa: E402
 from onembot.exchange.rest_client import RestClient, normalize_symbol, print_invalid_symbols  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
@@ -174,26 +186,52 @@ def suggest_grid_cfg(trial: optuna.Trial, base_grid_cfg: dict) -> dict:
     return cfg
 
 
-async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_client,
-                    start_date: datetime, end_date: datetime, count: int, fill_timeframe: str,
-                    min_win_ratio: float, min_fills: int) -> float:
-    grid_cfg = suggest_grid_cfg(trial, base_settings["grid"])
+def params_to_grid_cfg(base_grid_cfg: dict, params: dict) -> dict:
+    """Baut denselben grid-Block, den suggest_grid_cfg() waehrend eines Trials
+    erzeugt hat, aus dessen abgespeicherten Optuna-Params nach -- genutzt fuer
+    die OOS-Bestaetigung UND fuer apply_results(), damit beide garantiert
+    denselben Parametersatz verwenden wie der Trial, der ihn gefunden hat."""
+    cfg = copy.deepcopy(base_grid_cfg)
+    cfg["spacing_atr_mult"] = params["spacing_atr_mult"]
+    cfg["levels_per_side"] = params["levels_per_side"]
+    cfg.setdefault("sr_zones", {})["enabled"] = params["sr_zones_enabled"]
+    if params["sr_zones_enabled"]:
+        cfg["sr_zones"]["tolerance_pct"] = params["sr_tolerance_pct"]
+        cfg["sr_zones"]["min_touches"] = params["sr_min_touches"]
+    return cfg
+
+
+async def run_scored_backtest(symbol: str, base_settings: dict, grid_cfg: dict, rest_client,
+                               days: list[datetime], fill_timeframe: str, ledger_prefix: str) -> dict:
+    """Ein Multi-Day-Backtest ueber `days` mit einem festen grid_cfg, aufbereitet
+    zu denselben drei Kennzahlen (total_pnl/total_fills/win_ratio), die sowohl
+    die Optuna-Zielfunktion (auf IS-Tagen) als auch die OOS-Bestaetigung danach
+    (auf OOS-Tagen) brauchen -- eine gemeinsame Auswertung fuer beide."""
     trial_settings = dict(base_settings)
     trial_settings["per_symbol_overrides"] = {
         **base_settings.get("per_symbol_overrides", {}),
         symbol: {"grid": grid_cfg},
     }
-
     day_results = await run_multiday(
-        trial_settings, [symbol], start_date, end_date, count, fill_timeframe, rest_client,
-        ledger_prefix=f"optuna_{symbol.replace('/', '_').replace(':', '_')}_{trial.number}",
-        cleanup=True, log_progress=False,
+        trial_settings, [symbol], days, fill_timeframe, rest_client,
+        ledger_prefix=ledger_prefix, cleanup=True, log_progress=False,
     )
-
     total_pnl = sum(r.total_pnl_usdt for _, r in day_results)
     total_fills = sum(r.num_fills for _, r in day_results)
     win_days = sum(1 for _, r in day_results if r.total_pnl_usdt > 0)
     win_ratio = win_days / len(day_results) if day_results else 0.0
+    return {"total_pnl": total_pnl, "total_fills": total_fills, "win_ratio": win_ratio}
+
+
+async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_client,
+                    is_days: list[datetime], fill_timeframe: str,
+                    min_win_ratio: float, min_fills: int) -> float:
+    grid_cfg = suggest_grid_cfg(trial, base_settings["grid"])
+    metrics = await run_scored_backtest(
+        symbol, base_settings, grid_cfg, rest_client, is_days, fill_timeframe,
+        ledger_prefix=f"optuna_{symbol.replace('/', '_').replace(':', '_')}_{trial.number}",
+    )
+    total_pnl, total_fills, win_ratio = metrics["total_pnl"], metrics["total_fills"], metrics["win_ratio"]
 
     trial.set_user_attr("total_pnl", total_pnl)
     trial.set_user_attr("total_fills", total_fills)
@@ -205,27 +243,31 @@ async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_c
     return total_pnl
 
 
-def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argparse.Namespace) -> optuna.trial.FrozenTrial:
+def is_feasible(metrics: dict, min_fills: int, min_win_ratio: float) -> bool:
+    return metrics["total_fills"] >= min_fills and metrics["win_ratio"] >= min_win_ratio
+
+
+def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argparse.Namespace,
+                      is_days: list[datetime], oos_days: list[datetime],
+                      min_oos_fills: int) -> tuple[optuna.trial.FrozenTrial, dict]:
     study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=42))
 
     def objective(trial: optuna.Trial) -> float:
         return asyncio.run(evaluate(
             trial, symbol, base_settings, rest_client,
-            args.start_date, args.end_date, args.count, args.fill_timeframe,
-            args.min_win_ratio, args.min_fills,
+            is_days, args.fill_timeframe, args.min_win_ratio, args.min_fills,
         ))
 
     def report_progress(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         # Ohne dieses Lebenszeichen sieht man bei 60 stillen Trials nicht, ob
         # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
         # genau die Frage, die beim ersten echten Testlauf aufkam.
-        feasible = (trial.user_attrs.get("total_fills", 0) >= args.min_fills
-                    and trial.user_attrs.get("win_ratio", 0.0) >= args.min_win_ratio)
+        feasible = is_feasible(trial.user_attrs, args.min_fills, args.min_win_ratio)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
         dur = trial.duration.total_seconds() if trial.duration is not None else None
         dur_str = f"{dur:.1f}s" if dur is not None else "?"
         rest_client.ticker.print_line(
-            f"  [{trial.number + 1}/{args.trials}] PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
+            f"  [{trial.number + 1}/{args.trials}] IS-PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
             f"Fills={trial.user_attrs.get('total_fills', 0)}  "
             f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
             f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)  "
@@ -233,30 +275,48 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         )
 
     rest_client.ticker.print_line(
-        "  (Erster Trial laedt die Preishistorie per REST -- dauert am laengsten, "
+        f"  (In-Sample: {len(is_days)} Tage, Out-of-Sample: {len(oos_days)} Tage. "
+        "Erster Trial laedt die Preishistorie per REST -- dauert am laengsten, "
         "danach greift der Cache und es wird deutlich schneller)"
     )
     study.optimize(objective, n_trials=args.trials, show_progress_bar=False, callbacks=[report_progress])
-    return study.best_trial
+    best = study.best_trial
+
+    rest_client.ticker.print_line(
+        f"  IS-bestes Ergebnis: PnL={best.user_attrs['total_pnl']:+.4f} USDT, "
+        f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%"
+    )
+    rest_client.ticker.print_line(f"  Params: {best.params}")
+    rest_client.ticker.print_line("  Bestaetige auf Out-of-Sample-Tagen (von Optuna nie gesehen)...")
+
+    grid_cfg = params_to_grid_cfg(base_settings["grid"], best.params)
+    oos_metrics = asyncio.run(run_scored_backtest(
+        symbol, base_settings, grid_cfg, rest_client, oos_days, args.fill_timeframe,
+        ledger_prefix=f"oos_{symbol.replace('/', '_').replace(':', '_')}",
+    ))
+    oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio)
+    rest_client.ticker.print_line(
+        f"  OOS-Ergebnis [{'OK' if oos_ok else 'GATE VERFEHLT'}]: PnL={oos_metrics['total_pnl']:+.4f} USDT, "
+        f"Fills={oos_metrics['total_fills']} (Mindest: {min_oos_fills}), "
+        f"Gewinntage-Quote={oos_metrics['win_ratio']*100:.1f}%"
+    )
+    return best, oos_metrics
 
 
-def apply_results(settings: dict, results: dict[str, optuna.trial.FrozenTrial], min_fills: int,
-                   min_win_ratio: float) -> None:
+def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTrial, dict]], min_fills: int,
+                   min_win_ratio: float, min_oos_fills: int) -> None:
     overrides = settings.setdefault("per_symbol_overrides", {})
     applied, skipped = [], []
-    for symbol, best in results.items():
-        feasible = best.user_attrs["total_fills"] >= min_fills and best.user_attrs["win_ratio"] >= min_win_ratio
-        if not feasible:
+    for symbol, (best, oos_metrics) in results.items():
+        # Beide Gates muessen greifen -- ein Parametersatz, der nur in-sample
+        # gut aussieht, ist per Definition dieses Skripts genau das
+        # In-Sample-Rauschen, das der OOS-Split verhindern soll (siehe
+        # Modul-Docstring, dnabot-Praezedenzfall).
+        if not (is_feasible(best.user_attrs, min_fills, min_win_ratio)
+                and is_feasible(oos_metrics, min_oos_fills, min_win_ratio)):
             skipped.append(symbol)
             continue
-        grid_cfg = copy.deepcopy(settings["grid"])
-        grid_cfg["spacing_atr_mult"] = best.params["spacing_atr_mult"]
-        grid_cfg["levels_per_side"] = best.params["levels_per_side"]
-        grid_cfg.setdefault("sr_zones", {})["enabled"] = best.params["sr_zones_enabled"]
-        if best.params["sr_zones_enabled"]:
-            grid_cfg["sr_zones"]["tolerance_pct"] = best.params["sr_tolerance_pct"]
-            grid_cfg["sr_zones"]["min_touches"] = best.params["sr_min_touches"]
-        overrides[symbol] = {"grid": grid_cfg}
+        overrides[symbol] = {"grid": params_to_grid_cfg(settings["grid"], best.params)}
         applied.append(symbol)
 
     (ROOT / "settings.json").write_text(json.dumps(settings, indent=4) + "\n", encoding="utf-8")
@@ -264,8 +324,9 @@ def apply_results(settings: dict, results: dict[str, optuna.trial.FrozenTrial], 
     if applied:
         print(f"\n[OK] settings.json aktualisiert -- per_symbol_overrides fuer: {', '.join(applied)}")
     if skipped:
-        print(f"[!] Gate verfehlt (min_fills={min_fills}, min_win_ratio={min_win_ratio}) -- "
-              f"NICHT uebernommen, laeuft weiter mit dem globalen grid-Block: {', '.join(skipped)}")
+        print(f"[!] IS- oder OOS-Gate verfehlt (min_fills={min_fills}, min_oos_fills={min_oos_fills}, "
+              f"min_win_ratio={min_win_ratio}) -- NICHT uebernommen, laeuft weiter mit dem globalen "
+              f"grid-Block: {', '.join(skipped)}")
 
 
 def main() -> None:
@@ -279,14 +340,33 @@ def main() -> None:
     parser.add_argument("--min-win-ratio", type=float, default=0.5,
                          help="Mindest-Gewinntage-Quote, sonst gilt der Trial als ungueltig (Standard: 0.5)")
     parser.add_argument("--min-fills", type=int, default=20,
-                         help="Mindest-Fills ueber das gesamte Fenster, sonst gilt der Trial als ungueltig (Standard: 20)")
+                         help="Mindest-Fills ueber das gesamte In-Sample-Fenster, sonst gilt der Trial als ungueltig (Standard: 20)")
+    parser.add_argument("--is-fraction", type=float, default=0.7,
+                         help="Anteil der aeltesten Tage, die Optuna beim Suchen sieht -- der Rest (juengste Tage) "
+                              "dient nur der Out-of-Sample-Bestaetigung danach (Standard: 0.7)")
     parser.add_argument("--exchange", default="bitget", choices=list(EXCHANGE_OPTIONS.keys()),
                          help="Exchange fuer den historischen OHLCV-Abruf (Standard: bitget)")
     parser.add_argument("--apply", action="store_true",
-                         help="Bestes Ergebnis pro Symbol direkt in settings.json uebernehmen (nur wenn Gates erreicht)")
+                         help="Bestes Ergebnis pro Symbol direkt in settings.json uebernehmen (nur wenn IS- UND OOS-Gates erreicht)")
     args = parser.parse_args()
     args.start_date = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     args.end_date = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+    if not 0.0 < args.is_fraction < 1.0:
+        print(f"[FEHLER] --is-fraction muss zwischen 0 und 1 liegen (bekommen: {args.is_fraction}).")
+        sys.exit(1)
+
+    all_days = pick_days(args.start_date, args.end_date, args.count)
+    split_idx = max(1, round(len(all_days) * args.is_fraction))
+    is_days, oos_days = all_days[:split_idx], all_days[split_idx:]
+    if not oos_days:
+        print(f"[FEHLER] Bei --count {args.count} und --is-fraction {args.is_fraction} bleiben 0 Out-of-Sample-Tage "
+              f"uebrig ({len(is_days)} In-Sample). --count erhoehen oder --is-fraction senken.")
+        sys.exit(1)
+    # Mindest-Fills fuer die OOS-Bestaetigung proportional zum kleineren Zeitfenster
+    # skaliert -- derselbe absolute --min-fills-Wert waere auf einem 30%-Fenster
+    # unfair streng.
+    min_oos_fills = max(1, round(args.min_fills * len(oos_days) / len(is_days)))
 
     settings = load_json(ROOT / "settings.json")
     watchlist = [normalize_symbol(s) for s in args.symbols] if args.symbols else settings["watchlist"]
@@ -303,28 +383,26 @@ def main() -> None:
 
     print(f"=== 1mbot Grid-Optimierung: {len(watchlist)} Symbol(e), {args.trials} Trials, "
           f"{args.count} Tage zwischen {args.start} und {args.end} ({args.exchange}) ===")
+    print(f"    In-Sample: {len(is_days)} Tage (aelteste) | Out-of-Sample: {len(oos_days)} Tage "
+          f"(juengste, min_oos_fills={min_oos_fills})")
 
-    results: dict[str, optuna.trial.FrozenTrial] = {}
+    results: dict[str, tuple[optuna.trial.FrozenTrial, dict]] = {}
     ticker.start()
     for symbol in watchlist:
         ticker.print_line(f"\n--- {symbol}: optimiere ({args.trials} Trials) ---")
-        best = run_symbol_study(symbol, settings, rest_client, args)
-        results[symbol] = best
-        feasible = best.user_attrs["total_fills"] >= args.min_fills and best.user_attrs["win_ratio"] >= args.min_win_ratio
-        flag = "OK" if feasible else "GATE VERFEHLT"
-        ticker.print_line(f"  Bestes Ergebnis [{flag}]: PnL={best.user_attrs['total_pnl']:+.4f} USDT, "
-                           f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%")
-        ticker.print_line(f"  Params: {best.params}")
+        results[symbol] = run_symbol_study(symbol, settings, rest_client, args, is_days, oos_days, min_oos_fills)
     ticker.stop()
 
     print("\n=== Zusammenfassung ===")
-    for symbol, best in results.items():
-        feasible = best.user_attrs["total_fills"] >= args.min_fills and best.user_attrs["win_ratio"] >= args.min_win_ratio
-        flag = "OK" if feasible else "GATE VERFEHLT"
-        print(f"  {symbol:<20} PnL={best.user_attrs['total_pnl']:+.4f} USDT  [{flag}]")
+    for symbol, (best, oos_metrics) in results.items():
+        is_ok = is_feasible(best.user_attrs, args.min_fills, args.min_win_ratio)
+        oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio)
+        flag = "OK" if (is_ok and oos_ok) else ("OOS GATE VERFEHLT" if is_ok else "IS GATE VERFEHLT")
+        print(f"  {symbol:<20} IS-PnL={best.user_attrs['total_pnl']:+.4f} USDT  "
+              f"OOS-PnL={oos_metrics['total_pnl']:+.4f} USDT  [{flag}]")
 
     if args.apply:
-        apply_results(settings, results, args.min_fills, args.min_win_ratio)
+        apply_results(settings, results, args.min_fills, args.min_win_ratio, min_oos_fills)
     else:
         print("\n(--apply nicht gesetzt: settings.json wurde NICHT veraendert.)")
 

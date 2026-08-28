@@ -55,23 +55,27 @@ EXCHANGE_OPTIONS = {
 }
 
 
-async def run_multiday(settings: dict, watchlist: list[str], start_date: datetime, end_date: datetime,
-                        count: int, fill_timeframe: str, rest_client: RestClient,
+async def run_multiday(settings: dict, watchlist: list[str], days: list[datetime],
+                        fill_timeframe: str, rest_client: RestClient,
                         ledger_prefix: str = "replay_multiday", cleanup: bool = False,
                         log_progress: bool = True) -> list[tuple[datetime, "object"]]:
     """
     Kernschleife des Multi-Day-Backtests, herausgeloest aus main() -- wird
     sowohl vom CLI-Skript hier unten als auch von optimizer.py (ein Trial =
-    ein run_multiday()-Aufruf ueber dasselbe Fenster mit anderen Grid-Params)
-    aufgerufen. So bewertet die Optuna-Zielfunktion exakt dieselbe Backtest-
-    Logik, die auch beim manuellen `./show_results.sh`-Multi-Day-Modus laeuft
-    -- keine zweite, potenziell abweichende Auswertung.
+    ein run_multiday()-Aufruf ueber dieselbe Tagesliste mit anderen Grid-
+    Params) aufgerufen. So bewertet die Optuna-Zielfunktion exakt dieselbe
+    Backtest-Logik, die auch beim manuellen `./show_results.sh`-Multi-Day-
+    Modus laeuft -- keine zweite, potenziell abweichende Auswertung.
+
+    `days` wird bewusst als bereits fertige Liste uebergeben (statt
+    start_date/end_date/count hier selbst aufzuloesen) -- optimizer.py
+    braucht die exakte Tagesliste VORHER, um sie in einen In-Sample-/Out-
+    of-Sample-Teil zu splitten (siehe optimizer.py-Modul-Docstring).
 
     `cleanup=True` loescht die Ledger-Datei jedes Tages sofort nach dem
     Auslesen (fuer optimizer.py: Dutzende Trials x Dutzende Tage wuerden
     sonst artifacts/tracker/ mit Wegwerf-Dateien zumuellen).
     """
-    days = pick_days(start_date, end_date, count)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     day_results = []
 
@@ -107,10 +111,11 @@ async def main(start_str: str, end_str: str, count: int, fill_timeframe: str, sy
 
     start_date = datetime.strptime(start_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_date = datetime.strptime(end_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    days = pick_days(start_date, end_date, count)
 
-    logger.info(f"Ausgewaehlte Tage: {count} verteilt zwischen {start_str} und {end_str}")
+    logger.info(f"Ausgewaehlte Tage: {len(days)} verteilt zwischen {start_str} und {end_str}")
 
-    day_results = await run_multiday(settings, watchlist, start_date, end_date, count, fill_timeframe, rest_client)
+    day_results = await run_multiday(settings, watchlist, days, fill_timeframe, rest_client)
 
     print("")
     print(f"=== Multi-Day-Replay ({exchange_id}): {len(day_results)} Tage zwischen {start_str} und {end_str} ({fill_timeframe}-Naeherung) ===")
