@@ -49,6 +49,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
+# Ohne das hier ist stdout voll gepuffert, sobald es NICHT an ein Terminal
+# geht (z.B. `| tee log.txt`, systemd-Journal, oder einfach ein langsameres
+# Terminal-Backend) -- bei 60 stillen Trials sieht man dann minutenlang gar
+# nichts, bis der Puffer volllaeuft oder der Prozess endet (genau das Problem,
+# das beim ersten echten Testlauf auftrat: "haengt er? laedt er? optimiert er?").
+sys.stdout.reconfigure(line_buffering=True)
+
 import optuna  # noqa: E402
 
 from backtest_multiday import EXCHANGE_OPTIONS, run_multiday  # noqa: E402
@@ -146,7 +153,21 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
             args.min_win_ratio, args.min_fills,
         ))
 
-    study.optimize(objective, n_trials=args.trials, show_progress_bar=False)
+    def report_progress(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        # Ohne dieses Lebenszeichen sieht man bei 60 stillen Trials nicht, ob
+        # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
+        # genau die Frage, die beim ersten echten Testlauf aufkam.
+        feasible = (trial.user_attrs.get("total_fills", 0) >= args.min_fills
+                    and trial.user_attrs.get("win_ratio", 0.0) >= args.min_win_ratio)
+        best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
+        print(f"  [{trial.number + 1}/{args.trials}] PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
+              f"Fills={trial.user_attrs.get('total_fills', 0)}  "
+              f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
+              f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)", flush=True)
+
+    print(f"  (Erster Trial laedt die Preishistorie per REST -- dauert am laengsten, "
+          f"danach greift der Cache und es wird deutlich schneller)", flush=True)
+    study.optimize(objective, n_trials=args.trials, show_progress_bar=False, callbacks=[report_progress])
     return study.best_trial
 
 
