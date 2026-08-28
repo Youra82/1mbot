@@ -43,6 +43,24 @@ from .utils.timeframes import timeframe_to_timedelta as _timeframe_delta
 logger = logging.getLogger(__name__)
 
 
+def _tail_up_to(df, ts, n_candles: int):
+    """
+    Letzte `n_candles` Zeilen mit Index <= ts -- aequivalent zu
+    `df[df.index <= ts].tail(n_candles)`, aber O(log n) statt O(n) per
+    Aufruf. df muss aufsteigend sortiert und indexeindeutig sein (garantiert
+    durch RestClient.fetch_ohlcv_range()).
+
+    Der Unterschied ist bei regime_refresh_minutes == fill_timeframe (im
+    Standard-Setup beides 1m) entscheidend: die boolesche Maskierung
+    `df.index <= ts` scannt dabei bei JEDEM Tick die komplette Serie linear
+    -- bei 20 Tagen x 1440 1m-Ticks/Tag macht das ~29k volle Scans pro Trial
+    (gemessen: ~500s/Trial). searchsorted() macht dieselbe Aufloesung per
+    Binaersuche.
+    """
+    pos = df.index.searchsorted(ts, side="right")
+    return df.iloc[max(0, pos - n_candles):pos]
+
+
 async def replay_symbol(symbol: str, settings: dict, rest_client: RestClient, start: datetime, end: datetime,
                          fill_timeframe: str, ledger: FillLedger) -> int:
     """Simuliert einen Symbol-Verlauf zwischen `start` und `end`. Gibt die Anzahl der Fills zurueck."""
@@ -118,15 +136,15 @@ async def replay_symbol(symbol: str, settings: dict, rest_client: RestClient, st
 
         if sr_enabled and (last_sr_recalc is None or (ts - last_sr_recalc) >= sr_refresh):
             # WICHTIG: nur Daten bis `ts` verwenden -- kein Lookahead (wie beim Regime-Slice unten).
-            df_sr_slice = df_sr_full[df_sr_full.index <= ts].tail(sr_lookback_candles)
+            df_sr_slice = _tail_up_to(df_sr_full, ts, sr_lookback_candles)
             worker.apply_sr_data(df_sr_slice)
             last_sr_recalc = ts
 
         if last_regime_recalc is None or (ts - last_regime_recalc) >= regime_refresh:
             # WICHTIG: nur Daten bis `ts` verwenden -- kein Lookahead in die Zukunft
             # der Simulation (der Klassiker aus den anderen Bots im Repo).
-            df_regime_slice = df_regime_full[df_regime_full.index <= ts].tail(lookback_candles)
-            df_atr_slice = df_atr_full[df_atr_full.index <= ts].tail(atr_window)
+            df_regime_slice = _tail_up_to(df_regime_full, ts, lookback_candles)
+            df_atr_slice = _tail_up_to(df_atr_full, ts, atr_window)
             exited_range = worker.apply_regime_data(df_regime_slice, df_atr_slice)
             if exited_range:
                 await worker.cancel_all_orders()

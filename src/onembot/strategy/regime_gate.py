@@ -74,16 +74,22 @@ def compute_hurst(close: pd.Series, lags: int = 20, min_lookback: int = 200) -> 
         n_chunks = len(log_returns) // lag
         if n_chunks < 4:
             continue
-        rs_vals = []
-        for c in range(n_chunks):
-            chunk = log_returns[c * lag:(c + 1) * lag]
-            dev = np.cumsum(chunk - chunk.mean())
-            r = dev.max() - dev.min()
-            s = chunk.std()
-            if s > 1e-10:
-                rs_vals.append(r / s)
-        if rs_vals:
-            tau.append(float(np.mean(rs_vals)))
+        # Vektorisiert statt Python-Schleife ueber einzelne Chunks: mathematisch
+        # identisch (reshape in (n_chunks, lag), dieselben Formeln batched statt
+        # pro Chunk einzeln), aber ohne die ~500 einzelnen Mini-numpy-Aufrufe
+        # (mean/cumsum/std auf Arrays der Groesse `lag`) pro compute_hurst()-Call.
+        # Bei regime_refresh_minutes == fill_timeframe (Standard: beide 1m) laeuft
+        # das im Replay auf JEDEM Tick -- profiliert: 38s von 50s Gesamtlaufzeit
+        # fuer einen einzelnen Tages-Trial gingen allein hier drauf.
+        usable = n_chunks * lag
+        chunks = log_returns[:usable].reshape(n_chunks, lag)
+        means = chunks.mean(axis=1, keepdims=True)
+        dev = np.cumsum(chunks - means, axis=1)
+        r = dev.max(axis=1) - dev.min(axis=1)
+        s = chunks.std(axis=1)
+        valid = s > 1e-10
+        if np.any(valid):
+            tau.append(float(np.mean(r[valid] / s[valid])))
             lag_list.append(lag)
 
     if len(tau) < 2:
