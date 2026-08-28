@@ -88,11 +88,20 @@ class CachingRestClient:
     def __init__(self, inner: RestClient):
         self._inner = inner
         self._cache: dict[tuple, "object"] = {}
+        self._fetch_count = 0
+        self.printed_progress = False  # von run_symbol_study() gelesen, um die Zeile sauber abzuschliessen
 
     def fetch_ohlcv_range(self, symbol: str, timeframe: str, since: datetime, until: datetime,
                            page_limit: int = 1000):
         key = (symbol, timeframe, since.isoformat(), until.isoformat())
         if key not in self._cache:
+            self._fetch_count += 1
+            # \r statt \n: ein Trial braucht bis zu ~80 Einzelabrufe (Tage x
+            # Timeframes) fuer die Historie -- eine Zeile pro Abruf waere selbst
+            # Spam, eine sich selbst ueberschreibende Zaehl-Zeile zeigt trotzdem,
+            # dass etwas passiert.
+            print(f"\r  Lade Preishistorie... ({self._fetch_count} Abrufe)", end="", flush=True)
+            self.printed_progress = True
             self._cache[key] = self._inner.fetch_ohlcv_range(symbol, timeframe, since, until, page_limit)
         return self._cache[key].copy()
 
@@ -157,6 +166,9 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         # Ohne dieses Lebenszeichen sieht man bei 60 stillen Trials nicht, ob
         # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
         # genau die Frage, die beim ersten echten Testlauf aufkam.
+        if getattr(rest_client, "printed_progress", False):
+            print()  # schliesst die \r-Ladeanzeige aus fetch_ohlcv_range mit einem Zeilenumbruch ab
+            rest_client.printed_progress = False
         feasible = (trial.user_attrs.get("total_fills", 0) >= args.min_fills
                     and trial.user_attrs.get("win_ratio", 0.0) >= args.min_win_ratio)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
