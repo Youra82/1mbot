@@ -35,6 +35,7 @@ from .strategy import grid_engine, sr_zones
 from .strategy.regime_gate import Regime, classify_regime, compute_atr
 from .utils import state as state_store
 from .utils.ledger import FillLedger
+from .utils.symbol_settings import resolve_symbol_settings
 from .utils.telegram import send_message
 from .utils.timeframes import timeframe_to_minutes
 
@@ -437,7 +438,8 @@ async def run_bot(settings: dict, account_config: dict | None, telegram_cfg: dic
     portfolio_risk = PortfolioRiskManager(settings["risk"]["max_portfolio_inventory_usdt"])
 
     workers = [
-        SymbolWorker(symbol, settings, rest_client, ws_client, broker, telegram_cfg, ledger, portfolio_risk)
+        SymbolWorker(symbol, resolve_symbol_settings(settings, symbol), rest_client, ws_client, broker,
+                     telegram_cfg, ledger, portfolio_risk)
         for symbol in settings["watchlist"]
     ]
 

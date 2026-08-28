@@ -10,6 +10,8 @@
         "ETH/USDT:USDT"
     ],
 
+    "per_symbol_overrides": {},
+
     "regime": {
         "hurst_trend_min": 0.55,
         "adx_trend_min": 25.0,

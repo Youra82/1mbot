@@ -55,6 +55,45 @@ EXCHANGE_OPTIONS = {
 }
 
 
+async def run_multiday(settings: dict, watchlist: list[str], start_date: datetime, end_date: datetime,
+                        count: int, fill_timeframe: str, rest_client: RestClient,
+                        ledger_prefix: str = "replay_multiday", cleanup: bool = False,
+                        log_progress: bool = True) -> list[tuple[datetime, "object"]]:
+    """
+    Kernschleife des Multi-Day-Backtests, herausgeloest aus main() -- wird
+    sowohl vom CLI-Skript hier unten als auch von optimizer.py (ein Trial =
+    ein run_multiday()-Aufruf ueber dasselbe Fenster mit anderen Grid-Params)
+    aufgerufen. So bewertet die Optuna-Zielfunktion exakt dieselbe Backtest-
+    Logik, die auch beim manuellen `./show_results.sh`-Multi-Day-Modus laeuft
+    -- keine zweite, potenziell abweichende Auswertung.
+
+    `cleanup=True` loescht die Ledger-Datei jedes Tages sofort nach dem
+    Auslesen (fuer optimizer.py: Dutzende Trials x Dutzende Tage wuerden
+    sonst artifacts/tracker/ mit Wegwerf-Dateien zumuellen).
+    """
+    days = pick_days(start_date, end_date, count)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    day_results = []
+
+    for day_start in days:
+        day_end = day_start + timedelta(days=1)
+        ledger = FillLedger(f"{ledger_prefix}_{run_id}_{day_start.strftime('%Y%m%d')}.jsonl")
+
+        for symbol in watchlist:
+            n_fills = await replay_symbol(symbol, settings, rest_client, day_start, day_end, fill_timeframe, ledger)
+            if log_progress:
+                logger.info(f"{day_start.strftime('%Y-%m-%d')} {symbol}: {n_fills} simulierte Fills.")
+
+        fills = ledger.load()
+        report = build_report(fills)
+        day_results.append((day_start, report))
+
+        if cleanup:
+            ledger.path.unlink(missing_ok=True)
+
+    return day_results
+
+
 async def main(start_str: str, end_str: str, count: int, fill_timeframe: str, symbols: list[str] | None,
                 exchange_id: str) -> None:
     settings = load_json(ROOT / "settings.json")
@@ -63,27 +102,13 @@ async def main(start_str: str, end_str: str, count: int, fill_timeframe: str, sy
 
     start_date = datetime.strptime(start_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     end_date = datetime.strptime(end_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-    days = pick_days(start_date, end_date, count)
 
-    logger.info(f"Ausgewaehlte Tage ({len(days)}): {', '.join(d.strftime('%Y-%m-%d') for d in days)}")
+    logger.info(f"Ausgewaehlte Tage: {count} verteilt zwischen {start_str} und {end_str}")
 
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    day_results = []
-
-    for day_start in days:
-        day_end = day_start + timedelta(days=1)
-        ledger = FillLedger(f"replay_multiday_{run_id}_{day_start.strftime('%Y%m%d')}.jsonl")
-
-        for symbol in watchlist:
-            n_fills = await replay_symbol(symbol, settings, rest_client, day_start, day_end, fill_timeframe, ledger)
-            logger.info(f"{day_start.strftime('%Y-%m-%d')} {symbol}: {n_fills} simulierte Fills.")
-
-        fills = ledger.load()
-        report = build_report(fills)
-        day_results.append((day_start, report))
+    day_results = await run_multiday(settings, watchlist, start_date, end_date, count, fill_timeframe, rest_client)
 
     print("")
-    print(f"=== Multi-Day-Replay ({exchange_id}): {len(days)} Tage zwischen {start_str} und {end_str} ({fill_timeframe}-Naeherung) ===")
+    print(f"=== Multi-Day-Replay ({exchange_id}): {len(day_results)} Tage zwischen {start_str} und {end_str} ({fill_timeframe}-Naeherung) ===")
     print(f"{'Datum':<12} {'Fills':>6} {'PnL USDT':>12}")
     total_fills = 0
     total_pnl = 0.0
@@ -101,8 +126,8 @@ async def main(start_str: str, end_str: str, count: int, fill_timeframe: str, sy
     print("")
     print(f"Fills gesamt:      {total_fills}")
     print(f"PnL gesamt:        {total_pnl:+.4f} USDT")
-    print(f"PnL Durchschnitt:  {total_pnl / len(days):+.4f} USDT/Tag")
-    print(f"Gewinn-/Verlust-Tage: {win_days} Gewinn / {loss_days} Verlust / {len(days) - win_days - loss_days} neutral (0 Fills)")
+    print(f"PnL Durchschnitt:  {total_pnl / len(day_results):+.4f} USDT/Tag")
+    print(f"Gewinn-/Verlust-Tage: {win_days} Gewinn / {loss_days} Verlust / {len(day_results) - win_days - loss_days} neutral (0 Fills)")
     print("")
     print("HINWEIS: Candle-basierte Naeherung (High/Low als Touch-Proxy, optimistisch,")
     print("Reihenfolge innerhalb einer Kerze unbekannt) -- siehe src/onembot/replay.py.")

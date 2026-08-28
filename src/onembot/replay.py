@@ -36,6 +36,7 @@ from .paper_broker import PaperBroker
 from .risk.portfolio import PortfolioRiskManager
 from .run_loop import SymbolWorker
 from .utils.ledger import FillLedger
+from .utils.symbol_settings import resolve_symbol_settings
 from .utils.timeframes import timeframe_to_minutes
 from .utils.timeframes import timeframe_to_timedelta as _timeframe_delta
 
@@ -45,6 +46,7 @@ logger = logging.getLogger(__name__)
 async def replay_symbol(symbol: str, settings: dict, rest_client: RestClient, start: datetime, end: datetime,
                          fill_timeframe: str, ledger: FillLedger) -> int:
     """Simuliert einen Symbol-Verlauf zwischen `start` und `end`. Gibt die Anzahl der Fills zurueck."""
+    settings = resolve_symbol_settings(settings, symbol)
     regime_cfg = settings["regime"]
     grid_cfg = settings["grid"]
     regime_tf = settings["regime_timeframe"]
