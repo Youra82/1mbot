@@ -44,6 +44,8 @@ import copy
 import json
 import logging
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -77,6 +79,63 @@ def load_json(path: Path) -> dict:
         return json.load(f)
 
 
+class LiveTicker:
+    """
+    Laufender "laeuft seit MM:SS"-Heartbeat auf einem eigenen Hintergrund-
+    Thread, ueber eine sich selbst ueberschreibende Zeile (\r).
+
+    Notwendig, weil sowohl das Nachladen der Preishistorie (ccxt ist
+    synchron -- ein einzelner REST-Call blockiert den Hauptthread fuer die
+    Dauer des Requests) als auch die eigentliche Kerze-fuer-Kerze-Simulation
+    minutenlang ohne einen einzigen natuerlichen Print-Zeitpunkt laufen
+    koennen. Ein einzelner Thread kann waehrend eines blockierenden Aufrufs
+    nichts anderes tun -- nur ein zweiter Thread kann in der Zwischenzeit
+    weiter "ticken".
+
+    Alle "echten" Zeilen waehrend der Laufzeit MUESSEN ueber print_line()
+    statt print() gehen, sonst ueberschreiben sich Ticker-Zeile und echte
+    Ausgabe gegenseitig.
+    """
+
+    def __init__(self, interval: float = 1.0):
+        self._interval = interval
+        self._start = time.monotonic()
+        self._fetch_count = 0
+        self._lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._start = time.monotonic()
+        self._fetch_count = 0
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=self._interval + 1)
+        with self._lock:
+            print("\r" + " " * 70 + "\r", end="", flush=True)
+
+    def on_fetch(self) -> None:
+        with self._lock:
+            self._fetch_count += 1
+
+    def print_line(self, text: str) -> None:
+        with self._lock:
+            print("\r" + " " * 70 + "\r" + text, flush=True)
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(self._interval):
+            with self._lock:
+                elapsed = time.monotonic() - self._start
+                mins, secs = divmod(int(elapsed), 60)
+                print(f"\r  ... laeuft seit {mins:02d}:{secs:02d}  "
+                      f"({self._fetch_count} Preishistorie-Abrufe geladen)  ", end="", flush=True)
+
+
 class CachingRestClient:
     """
     Wrapper um RestClient: cacht fetch_ohlcv_range() im Speicher fuer die
@@ -85,23 +144,17 @@ class CachingRestClient:
     zwischen Trials nicht aendert.
     """
 
-    def __init__(self, inner: RestClient):
+    def __init__(self, inner: RestClient, ticker: LiveTicker | None = None):
         self._inner = inner
         self._cache: dict[tuple, "object"] = {}
-        self._fetch_count = 0
-        self.printed_progress = False  # von run_symbol_study() gelesen, um die Zeile sauber abzuschliessen
+        self.ticker = ticker
 
     def fetch_ohlcv_range(self, symbol: str, timeframe: str, since: datetime, until: datetime,
                            page_limit: int = 1000):
         key = (symbol, timeframe, since.isoformat(), until.isoformat())
         if key not in self._cache:
-            self._fetch_count += 1
-            # \r statt \n: ein Trial braucht bis zu ~80 Einzelabrufe (Tage x
-            # Timeframes) fuer die Historie -- eine Zeile pro Abruf waere selbst
-            # Spam, eine sich selbst ueberschreibende Zaehl-Zeile zeigt trotzdem,
-            # dass etwas passiert.
-            print(f"\r  Lade Preishistorie... ({self._fetch_count} Abrufe)", end="", flush=True)
-            self.printed_progress = True
+            if self.ticker:
+                self.ticker.on_fetch()
             self._cache[key] = self._inner.fetch_ohlcv_range(symbol, timeframe, since, until, page_limit)
         return self._cache[key].copy()
 
@@ -166,19 +219,20 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         # Ohne dieses Lebenszeichen sieht man bei 60 stillen Trials nicht, ob
         # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
         # genau die Frage, die beim ersten echten Testlauf aufkam.
-        if getattr(rest_client, "printed_progress", False):
-            print()  # schliesst die \r-Ladeanzeige aus fetch_ohlcv_range mit einem Zeilenumbruch ab
-            rest_client.printed_progress = False
         feasible = (trial.user_attrs.get("total_fills", 0) >= args.min_fills
                     and trial.user_attrs.get("win_ratio", 0.0) >= args.min_win_ratio)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
-        print(f"  [{trial.number + 1}/{args.trials}] PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
-              f"Fills={trial.user_attrs.get('total_fills', 0)}  "
-              f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
-              f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)", flush=True)
+        rest_client.ticker.print_line(
+            f"  [{trial.number + 1}/{args.trials}] PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
+            f"Fills={trial.user_attrs.get('total_fills', 0)}  "
+            f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
+            f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)"
+        )
 
-    print(f"  (Erster Trial laedt die Preishistorie per REST -- dauert am laengsten, "
-          f"danach greift der Cache und es wird deutlich schneller)", flush=True)
+    rest_client.ticker.print_line(
+        "  (Erster Trial laedt die Preishistorie per REST -- dauert am laengsten, "
+        "danach greift der Cache und es wird deutlich schneller)"
+    )
     study.optimize(objective, n_trials=args.trials, show_progress_bar=False, callbacks=[report_progress])
     return study.best_trial
 
@@ -233,8 +287,10 @@ def main() -> None:
 
     settings = load_json(ROOT / "settings.json")
     watchlist = [normalize_symbol(s) for s in args.symbols] if args.symbols else settings["watchlist"]
+    ticker = LiveTicker()
     rest_client = CachingRestClient(
-        RestClient(None, exchange_id=args.exchange, exchange_options=EXCHANGE_OPTIONS.get(args.exchange))
+        RestClient(None, exchange_id=args.exchange, exchange_options=EXCHANGE_OPTIONS.get(args.exchange)),
+        ticker=ticker,
     )
 
     invalid = rest_client.validate_symbols(watchlist)
@@ -246,15 +302,17 @@ def main() -> None:
           f"{args.count} Tage zwischen {args.start} und {args.end} ({args.exchange}) ===")
 
     results: dict[str, optuna.trial.FrozenTrial] = {}
+    ticker.start()
     for symbol in watchlist:
-        print(f"\n--- {symbol}: optimiere ({args.trials} Trials) ---")
+        ticker.print_line(f"\n--- {symbol}: optimiere ({args.trials} Trials) ---")
         best = run_symbol_study(symbol, settings, rest_client, args)
         results[symbol] = best
         feasible = best.user_attrs["total_fills"] >= args.min_fills and best.user_attrs["win_ratio"] >= args.min_win_ratio
         flag = "OK" if feasible else "GATE VERFEHLT"
-        print(f"  Bestes Ergebnis [{flag}]: PnL={best.user_attrs['total_pnl']:+.4f} USDT, "
-              f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%")
-        print(f"  Params: {best.params}")
+        ticker.print_line(f"  Bestes Ergebnis [{flag}]: PnL={best.user_attrs['total_pnl']:+.4f} USDT, "
+                           f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%")
+        ticker.print_line(f"  Params: {best.params}")
+    ticker.stop()
 
     print("\n=== Zusammenfassung ===")
     for symbol, best in results.items():
