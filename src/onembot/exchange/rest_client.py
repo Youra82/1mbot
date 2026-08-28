@@ -21,6 +21,15 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+def print_invalid_symbols(invalid: dict[str, list[str]], exchange_id: str) -> None:
+    """Gemeinsames Fehlerbild fuer optimizer.py/backtest_multiday.py/backtest_replay.py,
+    siehe RestClient.validate_symbols()."""
+    for sym, suggestions in invalid.items():
+        hint = f" Meintest du: {', '.join(suggestions)}?" if suggestions else ""
+        print(f"[FEHLER] Symbol '{sym}' nicht auf {exchange_id} gefunden.{hint}")
+    print("Abbruch -- Symbole muessen im ccxt-Format vorliegen (wie in settings.json['watchlist'], z.B. BTC/USDT:USDT).")
+
+
 class RestClient:
     def __init__(self, account_config: Optional[dict] = None, exchange_id: str = "bitget",
                  exchange_options: Optional[dict] = None):
@@ -126,6 +135,38 @@ class RestClient:
         lower = pd.Timestamp(since_ms, unit="ms", tz="UTC")
         upper = pd.Timestamp(until_ms, unit="ms", tz="UTC")
         return df[(df.index >= lower) & (df.index <= upper)]
+
+    def suggest_symbols(self, hint: str, limit: int = 5) -> list[str]:
+        """
+        Fuzzy-Vorschlaege fuer ein moeglicherweise falsch geschriebenes Symbol
+        (z.B. 'ETH' statt 'ETH/USDT:USDT') -- Teilstring-Match auf die bereits
+        geladenen Marktsymbole. load_markets() liefert Spot- UND Swap-Symbole
+        gemischt zurueck (defaultType='swap' filtert nur den Default-Endpoint,
+        nicht die Marktliste) -- USDT-M-Perpetuals (':USDT'-Suffix, das einzige,
+        was 1mbot handelt) werden deshalb zuerst vorgeschlagen, sonst waeren
+        die Top-Treffer oft irrelevante Spot-Paare wie 'ETH/BTC'.
+        """
+        if not self.markets:
+            return []
+        hint_upper = hint.upper()
+        matches = [s for s in self.markets if hint_upper in s.upper()]
+        matches.sort(key=lambda s: (":USDT" not in s, s))
+        return matches[:limit]
+
+    def validate_symbols(self, symbols: list[str]) -> dict[str, list[str]]:
+        """
+        Prueft, ob jedes Symbol als Markt bekannt ist. Gibt ein Dict
+        unbekanntes-Symbol -> Vorschlaege zurueck (leer = alle gueltig).
+
+        Ohne diese Pruefung VOR dem eigentlichen Backtest/Training haemmert
+        z.B. optimizer.py bei einem Tippfehler wie 'ETH' statt 'ETH/USDT:USDT'
+        60 Trials x 20 Tage lang denselben "Symbol nicht gefunden"-Fehlschlag
+        durch -- derselbe Fehler wird dann tausendfach neu entdeckt statt
+        einmal gemeldet.
+        """
+        if not self.markets:
+            return {}
+        return {s: self.suggest_symbols(s) for s in symbols if s not in self.markets}
 
     def fetch_balance_usdt(self) -> float:
         if not self.markets:

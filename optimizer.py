@@ -52,7 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 import optuna  # noqa: E402
 
 from backtest_multiday import EXCHANGE_OPTIONS, run_multiday  # noqa: E402
-from onembot.exchange.rest_client import RestClient  # noqa: E402
+from onembot.exchange.rest_client import RestClient, print_invalid_symbols  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent
 
@@ -203,6 +203,11 @@ def main() -> None:
     rest_client = CachingRestClient(
         RestClient(None, exchange_id=args.exchange, exchange_options=EXCHANGE_OPTIONS.get(args.exchange))
     )
+
+    invalid = rest_client.validate_symbols(watchlist)
+    if invalid:
+        print_invalid_symbols(invalid, args.exchange)
+        sys.exit(1)
 
     print(f"=== 1mbot Grid-Optimierung: {len(watchlist)} Symbol(e), {args.trials} Trials, "
           f"{args.count} Tage zwischen {args.start} und {args.end} ({args.exchange}) ===")

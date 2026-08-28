@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from onembot.exchange.rest_client import RestClient  # noqa: E402
+from onembot.exchange.rest_client import RestClient, print_invalid_symbols  # noqa: E402
 from onembot.replay import replay_symbol  # noqa: E402
 from onembot.utils.ledger import FillLedger  # noqa: E402
 from onembot.utils.report import build_report  # noqa: E402
@@ -38,6 +38,11 @@ async def main(days: int, fill_timeframe: str, symbols: list[str] | None) -> Non
     settings = load_json(ROOT / "settings.json")
     rest_client = RestClient(None)
     watchlist = symbols or settings["watchlist"]
+
+    invalid = rest_client.validate_symbols(watchlist)
+    if invalid:
+        print_invalid_symbols(invalid, "bitget")
+        sys.exit(1)
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
     ledger = FillLedger(f"replay_fills_{run_id}.jsonl")
