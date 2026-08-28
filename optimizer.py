@@ -14,14 +14,23 @@ handelt wie im Training bewertet.
 Zielfunktion ("Strict"-Modus, analog zu ltbbot/stbot): maximiert den Gesamt-
 PnL ueber ein Multi-Day-Backtest-Fenster (siehe backtest_multiday.py), aber
 nur Trials, die zusaetzlich
-  (a) eine Mindest-Gewinntage-Quote und
-  (b) eine Mindest-Fill-Zahl
+  (a) eine Mindest-Gewinntage-Quote,
+  (b) eine Mindest-Fill-Zahl und
+  (c) eine Payoff-Ratio (Avg-Win/Avg-Loss) innerhalb [min_payoff_ratio, max_payoff_ratio]
 erreichen, gelten als gueltig. Ohne (b) waere ein spacing_atr_mult, das so
 hoch ist, dass praktisch nie gehandelt wird, ein triviales "perfektes"
 0-Fills/0-Verlust-Optimum -- nicht das, was hier gesucht wird (vgl.
 Erfahrung aus anderen Bots im Repo: bei zu wenig Signalen zuerst die
 Trade-Menge fixen, nicht die Profitabilitaet auf Basis von ~0 Trades
-bewerten).
+bewerten). (c) kommt von der Payoff-Ratio/Breakeven-Winrate-Kurve (--min-
+payoff-ratio/--max-payoff-ratio, Standard 1.0/4.0): total_pnl > 0 impliziert
+zwar bereits "oberhalb der Breakeven-Kurve", aber die "Avoid Extreme"-Zonen
+an beiden Raendern (sehr niedrige ODER sehr hohe Payoff-Ratio) filtern
+Parametersaetze heraus, die nur durch ein fragiles Verhaeltnis aus vielen
+kleinen Gewinnern/wenigen grossen Verlierern (oder umgekehrt) profitabel
+aussehen -- payoff_ratio=None (keine Verlust-Fills im Fenster) wird NICHT
+bestraft, das ist zu wenig Datenpunkte fuer die Kennzahl, keine "extreme"
+Ratio.
 
 IN-SAMPLE / OUT-OF-SAMPLE-SPLIT (wie ltbbot/stbot, --is-fraction, Standard
 70/30): Optuna sieht beim Suchen NUR die aeltesten `is_fraction` der ueber
@@ -204,9 +213,14 @@ def params_to_grid_cfg(base_grid_cfg: dict, params: dict) -> dict:
 async def run_scored_backtest(symbol: str, base_settings: dict, grid_cfg: dict, rest_client,
                                days: list[datetime], fill_timeframe: str, ledger_prefix: str) -> dict:
     """Ein Multi-Day-Backtest ueber `days` mit einem festen grid_cfg, aufbereitet
-    zu denselben drei Kennzahlen (total_pnl/total_fills/win_ratio), die sowohl
-    die Optuna-Zielfunktion (auf IS-Tagen) als auch die OOS-Bestaetigung danach
-    (auf OOS-Tagen) brauchen -- eine gemeinsame Auswertung fuer beide."""
+    zu denselben Kennzahlen (total_pnl/total_fills/win_ratio/payoff_ratio), die
+    sowohl die Optuna-Zielfunktion (auf IS-Tagen) als auch die OOS-Bestaetigung
+    danach (auf OOS-Tagen) brauchen -- eine gemeinsame Auswertung fuer beide.
+
+    payoff_ratio (avg_win/avg_loss) wird aus den ROHEN Win/Loss-Summen ueber
+    ALLE Tage aggregiert (nicht als Mittelwert der Tages-Payoff-Ratios) --
+    sonst waeren Tage mit wenigen Fills genauso stark gewichtet wie Tage mit
+    vielen, siehe EquityReport.payoff_ratio-Docstring."""
     trial_settings = dict(base_settings)
     trial_settings["per_symbol_overrides"] = {
         **base_settings.get("per_symbol_overrides", {}),
@@ -220,31 +234,66 @@ async def run_scored_backtest(symbol: str, base_settings: dict, grid_cfg: dict, 
     total_fills = sum(r.num_fills for _, r in day_results)
     win_days = sum(1 for _, r in day_results if r.total_pnl_usdt > 0)
     win_ratio = win_days / len(day_results) if day_results else 0.0
-    return {"total_pnl": total_pnl, "total_fills": total_fills, "win_ratio": win_ratio}
+
+    total_win = sum(r.total_win_usdt for _, r in day_results)
+    total_loss = sum(r.total_loss_usdt for _, r in day_results)
+    win_count = sum(r.win_count for _, r in day_results)
+    loss_count = sum(r.loss_count for _, r in day_results)
+    avg_win = total_win / win_count if win_count else 0.0
+    avg_loss = total_loss / loss_count if loss_count else 0.0
+    payoff_ratio = (avg_win / avg_loss) if avg_loss > 0 else None
+
+    return {
+        "total_pnl": total_pnl, "total_fills": total_fills, "win_ratio": win_ratio,
+        "payoff_ratio": payoff_ratio,
+    }
 
 
 async def evaluate(trial: optuna.Trial, symbol: str, base_settings: dict, rest_client,
                     is_days: list[datetime], fill_timeframe: str,
-                    min_win_ratio: float, min_fills: int) -> float:
+                    min_win_ratio: float, min_fills: int,
+                    min_payoff_ratio: float, max_payoff_ratio: float) -> float:
     grid_cfg = suggest_grid_cfg(trial, base_settings["grid"])
     metrics = await run_scored_backtest(
         symbol, base_settings, grid_cfg, rest_client, is_days, fill_timeframe,
         ledger_prefix=f"optuna_{symbol.replace('/', '_').replace(':', '_')}_{trial.number}",
     )
-    total_pnl, total_fills, win_ratio = metrics["total_pnl"], metrics["total_fills"], metrics["win_ratio"]
+    total_pnl = metrics["total_pnl"]
+    total_fills = metrics["total_fills"]
+    win_ratio = metrics["win_ratio"]
+    payoff_ratio = metrics["payoff_ratio"]
 
     trial.set_user_attr("total_pnl", total_pnl)
     trial.set_user_attr("total_fills", total_fills)
     trial.set_user_attr("win_ratio", win_ratio)
+    trial.set_user_attr("payoff_ratio", payoff_ratio)
 
-    if total_fills < min_fills or win_ratio < min_win_ratio:
-        violation = max(0, min_fills - total_fills) + max(0.0, min_win_ratio - win_ratio) * 100
+    violation = max(0, min_fills - total_fills) + max(0.0, min_win_ratio - win_ratio) * 100
+    # payoff_ratio=None (keine Verlust-Fills im Fenster) wird NICHT bestraft --
+    # ein Datensatz ohne einen einzigen Verlust ist keine "extreme Payoff-Ratio",
+    # sondern schlicht zu wenig Datenpunkte fuer die Kennzahl (siehe Breakeven-
+    # Kurve: die "Avoid Extreme"-Zonen sind fuer *bekannte*, aber unguenstige
+    # Payoff-Ratios gedacht, nicht fuer fehlende Daten).
+    if payoff_ratio is not None:
+        if payoff_ratio < min_payoff_ratio:
+            violation += (min_payoff_ratio - payoff_ratio) * 10
+        elif payoff_ratio > max_payoff_ratio:
+            violation += (payoff_ratio - max_payoff_ratio) * 10
+
+    if violation > 0:
         return -1000.0 - violation
     return total_pnl
 
 
-def is_feasible(metrics: dict, min_fills: int, min_win_ratio: float) -> bool:
-    return metrics["total_fills"] >= min_fills and metrics["win_ratio"] >= min_win_ratio
+def is_feasible(metrics: dict, min_fills: int, min_win_ratio: float,
+                 min_payoff_ratio: float = 0.0, max_payoff_ratio: float = float("inf")) -> bool:
+    payoff_ratio = metrics.get("payoff_ratio")
+    payoff_ok = payoff_ratio is None or min_payoff_ratio <= payoff_ratio <= max_payoff_ratio
+    return metrics["total_fills"] >= min_fills and metrics["win_ratio"] >= min_win_ratio and payoff_ok
+
+
+def _fmt_payoff(payoff_ratio: float | None) -> str:
+    return f"{payoff_ratio:.2f}" if payoff_ratio is not None else "n/a (keine Verluste)"
 
 
 def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argparse.Namespace,
@@ -256,13 +305,15 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         return asyncio.run(evaluate(
             trial, symbol, base_settings, rest_client,
             is_days, args.fill_timeframe, args.min_win_ratio, args.min_fills,
+            args.min_payoff_ratio, args.max_payoff_ratio,
         ))
 
     def report_progress(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
         # Ohne dieses Lebenszeichen sieht man bei 60 stillen Trials nicht, ob
         # der Prozess haengt, noch Daten laedt oder einfach nur rechnet --
         # genau die Frage, die beim ersten echten Testlauf aufkam.
-        feasible = is_feasible(trial.user_attrs, args.min_fills, args.min_win_ratio)
+        feasible = is_feasible(trial.user_attrs, args.min_fills, args.min_win_ratio,
+                                args.min_payoff_ratio, args.max_payoff_ratio)
         best_pnl = study.best_trial.user_attrs.get("total_pnl", 0.0)
         dur = trial.duration.total_seconds() if trial.duration is not None else None
         dur_str = f"{dur:.1f}s" if dur is not None else "?"
@@ -270,6 +321,7 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
             f"  [{trial.number + 1}/{args.trials}] IS-PnL={trial.user_attrs.get('total_pnl', 0.0):+.4f} USDT  "
             f"Fills={trial.user_attrs.get('total_fills', 0)}  "
             f"Gewinntage={trial.user_attrs.get('win_ratio', 0.0)*100:.0f}%  "
+            f"Payoff={_fmt_payoff(trial.user_attrs.get('payoff_ratio'))}  "
             f"[{'OK' if feasible else 'Gate'}]  (bisher bestes: {best_pnl:+.4f} USDT)  "
             f"-- Dauer: {dur_str}"
         )
@@ -284,7 +336,8 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
 
     rest_client.ticker.print_line(
         f"  IS-bestes Ergebnis: PnL={best.user_attrs['total_pnl']:+.4f} USDT, "
-        f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%"
+        f"Fills={best.user_attrs['total_fills']}, Gewinntage-Quote={best.user_attrs['win_ratio']*100:.1f}%, "
+        f"Payoff-Ratio={_fmt_payoff(best.user_attrs.get('payoff_ratio'))}"
     )
     rest_client.ticker.print_line(f"  Params: {best.params}")
     rest_client.ticker.print_line("  Bestaetige auf Out-of-Sample-Tagen (von Optuna nie gesehen)...")
@@ -294,17 +347,20 @@ def run_symbol_study(symbol: str, base_settings: dict, rest_client, args: argpar
         symbol, base_settings, grid_cfg, rest_client, oos_days, args.fill_timeframe,
         ledger_prefix=f"oos_{symbol.replace('/', '_').replace(':', '_')}",
     ))
-    oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio)
+    oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio,
+                          args.min_payoff_ratio, args.max_payoff_ratio)
     rest_client.ticker.print_line(
         f"  OOS-Ergebnis [{'OK' if oos_ok else 'GATE VERFEHLT'}]: PnL={oos_metrics['total_pnl']:+.4f} USDT, "
         f"Fills={oos_metrics['total_fills']} (Mindest: {min_oos_fills}), "
-        f"Gewinntage-Quote={oos_metrics['win_ratio']*100:.1f}%"
+        f"Gewinntage-Quote={oos_metrics['win_ratio']*100:.1f}%, "
+        f"Payoff-Ratio={_fmt_payoff(oos_metrics.get('payoff_ratio'))}"
     )
     return best, oos_metrics
 
 
 def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTrial, dict]], min_fills: int,
-                   min_win_ratio: float, min_oos_fills: int) -> None:
+                   min_win_ratio: float, min_oos_fills: int,
+                   min_payoff_ratio: float, max_payoff_ratio: float) -> None:
     overrides = settings.setdefault("per_symbol_overrides", {})
     applied, skipped = [], []
     for symbol, (best, oos_metrics) in results.items():
@@ -312,8 +368,8 @@ def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTr
         # gut aussieht, ist per Definition dieses Skripts genau das
         # In-Sample-Rauschen, das der OOS-Split verhindern soll (siehe
         # Modul-Docstring, dnabot-Praezedenzfall).
-        if not (is_feasible(best.user_attrs, min_fills, min_win_ratio)
-                and is_feasible(oos_metrics, min_oos_fills, min_win_ratio)):
+        if not (is_feasible(best.user_attrs, min_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio)
+                and is_feasible(oos_metrics, min_oos_fills, min_win_ratio, min_payoff_ratio, max_payoff_ratio)):
             skipped.append(symbol)
             continue
         overrides[symbol] = {"grid": params_to_grid_cfg(settings["grid"], best.params)}
@@ -324,9 +380,9 @@ def apply_results(settings: dict, results: dict[str, tuple[optuna.trial.FrozenTr
     if applied:
         print(f"\n[OK] settings.json aktualisiert -- per_symbol_overrides fuer: {', '.join(applied)}")
     if skipped:
-        print(f"[!] IS- oder OOS-Gate verfehlt (min_fills={min_fills}, min_oos_fills={min_oos_fills}, "
-              f"min_win_ratio={min_win_ratio}) -- NICHT uebernommen, laeuft weiter mit dem globalen "
-              f"grid-Block: {', '.join(skipped)}")
+        print(f"[!] IS-, OOS- oder Payoff-Ratio-Gate verfehlt (min_fills={min_fills}, min_oos_fills={min_oos_fills}, "
+              f"min_win_ratio={min_win_ratio}, payoff_ratio=[{min_payoff_ratio}, {max_payoff_ratio}]) -- "
+              f"NICHT uebernommen, laeuft weiter mit dem globalen grid-Block: {', '.join(skipped)}")
 
 
 def main() -> None:
@@ -344,6 +400,12 @@ def main() -> None:
     parser.add_argument("--is-fraction", type=float, default=0.7,
                          help="Anteil der aeltesten Tage, die Optuna beim Suchen sieht -- der Rest (juengste Tage) "
                               "dient nur der Out-of-Sample-Bestaetigung danach (Standard: 0.7)")
+    parser.add_argument("--min-payoff-ratio", type=float, default=1.0,
+                         help="Mindest-Payoff-Ratio (Durchschnittsgewinn/Durchschnittsverlust) -- darunter gilt der "
+                              "Trial als 'Avoid Extreme'-Zone der Breakeven-Kurve (Standard: 1.0)")
+    parser.add_argument("--max-payoff-ratio", type=float, default=4.0,
+                         help="Hoechst-Payoff-Ratio -- darueber gilt der Trial ebenfalls als 'Avoid Extreme'-Zone "
+                              "(unrealistisch wenige, grosse Gewinner sind meist Ueberfitting) (Standard: 4.0)")
     parser.add_argument("--exchange", default="bitget", choices=list(EXCHANGE_OPTIONS.keys()),
                          help="Exchange fuer den historischen OHLCV-Abruf (Standard: bitget)")
     parser.add_argument("--apply", action="store_true",
@@ -385,6 +447,8 @@ def main() -> None:
           f"{args.count} Tage zwischen {args.start} und {args.end} ({args.exchange}) ===")
     print(f"    In-Sample: {len(is_days)} Tage (aelteste) | Out-of-Sample: {len(oos_days)} Tage "
           f"(juengste, min_oos_fills={min_oos_fills})")
+    print(f"    Payoff-Ratio-Gate: [{args.min_payoff_ratio}, {args.max_payoff_ratio}] "
+          f"(Avg-Win/Avg-Loss, Breakeven-Kurve 'Avoid Extreme'-Zonen)")
 
     results: dict[str, tuple[optuna.trial.FrozenTrial, dict]] = {}
     ticker.start()
@@ -395,14 +459,18 @@ def main() -> None:
 
     print("\n=== Zusammenfassung ===")
     for symbol, (best, oos_metrics) in results.items():
-        is_ok = is_feasible(best.user_attrs, args.min_fills, args.min_win_ratio)
-        oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio)
+        is_ok = is_feasible(best.user_attrs, args.min_fills, args.min_win_ratio,
+                             args.min_payoff_ratio, args.max_payoff_ratio)
+        oos_ok = is_feasible(oos_metrics, min_oos_fills, args.min_win_ratio,
+                              args.min_payoff_ratio, args.max_payoff_ratio)
         flag = "OK" if (is_ok and oos_ok) else ("OOS GATE VERFEHLT" if is_ok else "IS GATE VERFEHLT")
         print(f"  {symbol:<20} IS-PnL={best.user_attrs['total_pnl']:+.4f} USDT  "
-              f"OOS-PnL={oos_metrics['total_pnl']:+.4f} USDT  [{flag}]")
+              f"OOS-PnL={oos_metrics['total_pnl']:+.4f} USDT  "
+              f"IS-Payoff={_fmt_payoff(best.user_attrs.get('payoff_ratio'))}  [{flag}]")
 
     if args.apply:
-        apply_results(settings, results, args.min_fills, args.min_win_ratio, min_oos_fills)
+        apply_results(settings, results, args.min_fills, args.min_win_ratio, min_oos_fills,
+                       args.min_payoff_ratio, args.max_payoff_ratio)
     else:
         print("\n(--apply nicht gesetzt: settings.json wurde NICHT veraendert.)")
 

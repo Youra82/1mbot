@@ -67,6 +67,13 @@ read -p "Mindest-Gewinntage-Quote (0-1) [Standard: 0.5]: " MIN_WIN_RATIO; MIN_WI
 read -p "Mindest-Fills ueber das In-Sample-Fenster [Standard: 20]: " MIN_FILLS; MIN_FILLS=${MIN_FILLS:-20}
 
 echo ""
+echo "Payoff-Ratio-Gate (Avg-Win/Avg-Loss, Breakeven-Kurve): sehr niedrige ODER sehr hohe"
+echo "  Payoff-Ratios ('Avoid Extreme'-Zonen) deuten meist auf ein fragiles Verhaeltnis aus"
+echo "  vielen kleinen Gewinnern/wenigen grossen Verlierern (oder umgekehrt) hin."
+read -p "Mindest-Payoff-Ratio [Standard: 1.0]: " MIN_PAYOFF; MIN_PAYOFF=${MIN_PAYOFF:-1.0}
+read -p "Hoechst-Payoff-Ratio [Standard: 4.0]: " MAX_PAYOFF; MAX_PAYOFF=${MAX_PAYOFF:-4.0}
+
+echo ""
 echo "In-Sample-/Out-of-Sample-Split (wie ltbbot/stbot): Optuna sieht beim Suchen nur"
 echo "  die aeltesten X% der ausgewaehlten Tage -- der Rest (juengste Tage) bestaetigt"
 echo "  danach den besten gefundenen Parametersatz, ohne dass Optuna ihn je gesehen hat."
@@ -98,6 +105,8 @@ echo -e "${BLUE}=======================================================${NC}"
     --min-win-ratio "$MIN_WIN_RATIO" \
     --min-fills "$MIN_FILLS" \
     --is-fraction "$IS_FRACTION" \
+    --min-payoff-ratio "$MIN_PAYOFF" \
+    --max-payoff-ratio "$MAX_PAYOFF" \
     $APPLY_ARG
 RC=$?
 

@@ -63,3 +63,41 @@ def test_build_report_max_drawdown_tracks_peak_to_trough():
 
     assert report.total_pnl_usdt == pytest.approx(12.0)
     assert report.max_drawdown_usdt == pytest.approx(3.0)
+
+
+def test_payoff_ratio_computed_from_avg_win_over_avg_loss():
+    fills = [
+        _fill("X", 4.0, "t1"),
+        _fill("X", 2.0, "t2"),   # avg_win = 3.0
+        _fill("X", -1.0, "t3"),
+        _fill("X", -3.0, "t4"),  # avg_loss = 2.0
+    ]
+    report = build_report(fills)
+
+    assert report.win_count == 2
+    assert report.loss_count == 2
+    assert report.avg_win_usdt == pytest.approx(3.0)
+    assert report.avg_loss_usdt == pytest.approx(2.0)
+    assert report.payoff_ratio == pytest.approx(1.5)
+
+
+def test_payoff_ratio_none_without_losses():
+    fills = [_fill("X", 1.0, "t1"), _fill("X", 2.0, "t2")]
+    report = build_report(fills)
+    assert report.payoff_ratio is None
+
+
+def test_payoff_ratio_zero_without_wins():
+    fills = [_fill("X", -1.0, "t1"), _fill("X", -2.0, "t2")]
+    report = build_report(fills)
+    assert report.avg_win_usdt == 0.0
+    assert report.payoff_ratio == pytest.approx(0.0)
+
+
+def test_build_report_empty_win_loss_fields_default_to_zero():
+    report = build_report([])
+    assert report.win_count == 0
+    assert report.loss_count == 0
+    assert report.avg_win_usdt == 0.0
+    assert report.avg_loss_usdt == 0.0
+    assert report.payoff_ratio is None
