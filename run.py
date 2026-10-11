@@ -1,70 +1,59 @@
 #!/usr/bin/env python3
-"""
-Entry Point fuer 1mbot (Grid/Market-Making, Bitget).
+"""1mbot -- Einstieg (keine echten Orders, keine API-Keys noetig).
 
-Phase 1: reiner Dry-Run. live_trading=false wird zusaetzlich hart in
-onembot.exchange.ws_client.WsClient geprueft -- ein Config-Fehler allein
-kann keine echte Order ausloesen.
+settings.json "mode":
+  "listing"   Dry-Run-Waechter Upbit-KRW-Listing -> Papier-Short Bitget (Standard)
+  "recorder"  Sekunden-Daten-Recorder Binance/Bitget
+
+  python run.py                 # Dauerlauf (systemd-Service auf dem VPS)
+  python run.py --duration 120  # Recorder-Testlauf ueber 120 Sekunden
 """
+import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-from onembot.run_loop import run_bot  # noqa: E402
-
-ROOT = Path(__file__).resolve().parent
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(ROOT / "logs" / "1mbot.log", encoding="utf-8"),
-    ],
-)
-logger = logging.getLogger(__name__)
-
-
-def load_json(path: Path) -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+from onembot.recorder import main as recorder  # noqa: E402
+from onembot.recorder import telegram  # noqa: E402
 
 
 def main() -> None:
-    settings = load_json(ROOT / "settings.json")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--settings", default="settings.json")
+    ap.add_argument("--duration", type=float, default=None, help="Sekunden, danach sauber beenden")
+    ap.add_argument("--data-dir", default=None, help="ueberschreibt settings.data_dir (Tests)")
+    args = ap.parse_args()
 
-    secret_path = ROOT / "secret.json"
-    account_config = None
-    telegram_cfg = {"send_status_updates": False}
-    if secret_path.exists():
-        secrets = load_json(secret_path)
-        accounts = secrets.get("1mbot", [])
-        account_config = accounts[0] if accounts else None
-        telegram_secrets = secrets.get("telegram", {})
-        telegram_cfg = {
-            **settings.get("telegram", {}),
-            "bot_token": telegram_secrets.get("bot_token"),
-            "chat_id": telegram_secrets.get("chat_id"),
-        }
-    else:
-        logger.warning("secret.json nicht gefunden -- laeuft im rein oeffentlichen Modus ohne Telegram-Reporting.")
+    with open(args.settings, encoding="utf-8") as f:
+        settings = json.load(f)
+    if args.data_dir:
+        settings["data_dir"] = args.data_dir
+    if settings["capital"].get("live_trading"):
+        # Phase 1 kennt keine Orders -- ein versehentlich gesetztes Flag soll laut scheitern
+        sys.exit("live_trading=true, aber 1mbot kennt noch keine echten Orders. Abbruch.")
 
-    if settings["live_trading"]:
-        logger.critical(
-            "settings.json hat live_trading=true, aber Phase 1 von 1mbot unterstuetzt nur Dry-Run. Abbruch."
-        )
-        sys.exit(1)
-
-    logger.info(f"Starte 1mbot (Dry-Run) fuer {len(settings['watchlist'])} Symbole.")
-    asyncio.run(run_bot(settings, account_config, telegram_cfg))
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.StreamHandler(),
+                  logging.FileHandler(f"logs/{settings.get('mode', 'recorder')}.log", encoding="utf-8")],
+    )
+    try:
+        if settings.get("mode") == "listing":
+            from onembot.listing.watcher import run_forever
+            creds = telegram.load_telegram() if settings["telegram"].get("enabled", True) else None
+            run_forever(settings, lambda text: (logging.getLogger("1mbot").info("NOTIFY %s", text),
+                                                telegram.send(creds, text)))
+        else:
+            asyncio.run(recorder.run(settings, args.duration))
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("Beendet durch Benutzer.")
+    main()

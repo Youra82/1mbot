@@ -6,7 +6,9 @@ __pycache__/
 *.pyo
 logs/
 *.log
-artifacts/tracker/*.json
-artifacts/tracker/*.jsonl
+data/
 .pytest_cache/
 .DS_Store
+data_hist/
+data_long/
+research/listing/ev/

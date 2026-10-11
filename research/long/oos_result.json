@@ -1,0 +1,61 @@
+{
+  "B": {
+    "params": {
+      "z": 3,
+      "y": 0.02,
+      "H": 48
+    },
+    "oos": {
+      "n": 2614,
+      "trades_per_day": 3.1800486618004866,
+      "mean_net_pct": 0.02663034882848467,
+      "t_nw": 0.3016044340192414,
+      "days_with_trades": 661,
+      "days_pos_share": 0.5022692889561271,
+      "months_pos_share": 0.5185185185185185,
+      "long_share": 0.8117827084927315,
+      "best_coin": "ZECUSDT",
+      "mean_net_pct_without_best": -0.021760817175860786
+    },
+    "BESTANDEN": false
+  },
+  "F": {
+    "params": {
+      "k": 3,
+      "H": 288
+    },
+    "oos": {
+      "n": 1449,
+      "trades_per_day": 1.7627737226277371,
+      "mean_net_pct": 0.17335792260962415,
+      "t_nw": 0.34812847882711323,
+      "days_with_trades": 483,
+      "days_pos_share": 0.5134575569358178,
+      "months_pos_share": 0.5555555555555556,
+      "long_share": 0.18219461697722567,
+      "best_coin": "QNTUSDT",
+      "mean_net_pct_without_best": 0.07151808544704251
+    },
+    "BESTANDEN": false
+  },
+  "H": {
+    "params": {
+      "y": 0.06,
+      "z": 2,
+      "H": 48
+    },
+    "oos": {
+      "n": 787,
+      "trades_per_day": 0.9574209245742092,
+      "mean_net_pct": 0.03402712081425721,
+      "t_nw": -0.5890559270061474,
+      "days_with_trades": 457,
+      "days_pos_share": 0.40700218818380746,
+      "months_pos_share": 0.4074074074074074,
+      "long_share": 0.8271918678526048,
+      "best_coin": "FILUSDT",
+      "mean_net_pct_without_best": -0.04449447511030085
+    },
+    "BESTANDEN": false
+  }
+}

@@ -1,0 +1,4 @@
+*.sh text eol=lf
+*.service text eol=lf
+PRAEREGISTRIERUNG.md -text
+*.sha256 -text

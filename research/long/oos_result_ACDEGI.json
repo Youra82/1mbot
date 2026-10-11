@@ -1,0 +1,116 @@
+{
+  "A": {
+    "params": {
+      "L": 48,
+      "H": 48
+    },
+    "oos": {
+      "n": 4929,
+      "trades_per_day": 5.9963503649635035,
+      "mean_net_pct": -0.1952283297786494,
+      "t_nw": -19.64706189139492,
+      "days_with_trades": 822,
+      "days_pos_share": 0.19708029197080293,
+      "months_pos_share": 0.0,
+      "long_share": null,
+      "best_coin": "ONDOUSDT",
+      "mean_net_pct_without_best": -0.1965748391276864
+    },
+    "BESTANDEN": false
+  },
+  "C": {
+    "params": {
+      "thr": 0.0008,
+      "w": 6
+    },
+    "oos": {
+      "n": 1934,
+      "trades_per_day": 2.3527980535279807,
+      "mean_net_pct": -0.13413936702617338,
+      "t_nw": -2.917826014236653,
+      "days_with_trades": 383,
+      "days_pos_share": 0.34464751958224543,
+      "months_pos_share": 0.2222222222222222,
+      "long_share": 0.5,
+      "best_coin": "MAGICUSDT",
+      "mean_net_pct_without_best": -0.1874314475453438
+    },
+    "BESTANDEN": false
+  },
+  "D": {
+    "params": {
+      "k": 4,
+      "H": 288
+    },
+    "oos": {
+      "n": 8020,
+      "trades_per_day": 9.75669099756691,
+      "mean_net_pct": 0.019417077897733743,
+      "t_nw": 0.13305469420568938,
+      "days_with_trades": 808,
+      "days_pos_share": 0.5,
+      "months_pos_share": 0.5185185185185185,
+      "long_share": 0.7159600997506235,
+      "best_coin": "ZECUSDT",
+      "mean_net_pct_without_best": -0.03360943363314397
+    },
+    "BESTANDEN": false
+  },
+  "E": {
+    "params": {
+      "q": 0.995,
+      "H": 48
+    },
+    "oos": {
+      "n": 9092,
+      "trades_per_day": 11.060827250608272,
+      "mean_net_pct": -0.19028172691469505,
+      "t_nw": -7.186132394860339,
+      "days_with_trades": 803,
+      "days_pos_share": 0.36612702366127026,
+      "months_pos_share": 0.0,
+      "long_share": 0.5123185217773867,
+      "best_coin": "FILUSDT",
+      "mean_net_pct_without_best": -0.198208912876934
+    },
+    "BESTANDEN": false
+  },
+  "G": {
+    "params": {
+      "N": 55,
+      "ls": false
+    },
+    "oos": {
+      "n": 1130,
+      "trades_per_day": 1.3746958637469586,
+      "mean_net_pct": 0.9575100477244518,
+      "t_nw": 0.3632982312538586,
+      "days_with_trades": 331,
+      "days_pos_share": 0.32326283987915405,
+      "months_pos_share": 0.3333333333333333,
+      "long_share": 1.0,
+      "best_coin": "ZECUSDT",
+      "mean_net_pct_without_best": 0.5389617209217168
+    },
+    "BESTANDEN": false
+  },
+  "I": {
+    "params": {
+      "k": 8,
+      "H": 3
+    },
+    "oos": {
+      "n": 4120,
+      "trades_per_day": 5.012165450121654,
+      "mean_net_pct": 0.009023699206772368,
+      "t_nw": -2.420319265707058,
+      "days_with_trades": 666,
+      "days_pos_share": 0.484984984984985,
+      "months_pos_share": 0.4074074074074074,
+      "long_share": 0.5473300970873787,
+      "best_coin": "ENAUSDT",
+      "mean_net_pct_without_best": -0.024759435376807384
+    },
+    "BESTANDEN": false
+  }
+}

@@ -1,15 +1,16 @@
 [Unit]
-Description=1mbot - Grid/Market-Making Bot (Bitget)
+Description=1mbot - Upbit-Listing-Waechter (Dry-Run) / Recorder
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# ANPASSEN: Pfad zum tatsaechlichen Projektverzeichnis auf dem VPS
 WorkingDirectory=/home/REPLACE_ME/botprojekte/1mbot
 ExecStart=/home/REPLACE_ME/botprojekte/1mbot/.venv/bin/python3 run.py
-Restart=on-failure
+Restart=always
 RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
 StandardOutput=append:/home/REPLACE_ME/botprojekte/1mbot/logs/service.log
 StandardError=append:/home/REPLACE_ME/botprojekte/1mbot/logs/service.log
 

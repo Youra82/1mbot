@@ -1,0 +1,164 @@
+{
+  "A": {
+    "params": {
+      "L": 48,
+      "H": 48
+    },
+    "is": {
+      "n": 5470,
+      "trades_per_day": 5.99780701754386,
+      "mean_net_pct": -0.17938442189810289,
+      "t_nw": -19.955978893639728,
+      "days_with_trades": 912,
+      "days_pos_share": 0.20394736842105263,
+      "months_pos_share": 0.0,
+      "long_share": null
+    }
+  },
+  "C": {
+    "params": {
+      "thr": 0.0008,
+      "w": 6
+    },
+    "is": {
+      "n": 2250,
+      "trades_per_day": 2.4671052631578947,
+      "mean_net_pct": -0.16298704350383672,
+      "t_nw": -1.7192173456332733,
+      "days_with_trades": 358,
+      "days_pos_share": 0.41899441340782123,
+      "months_pos_share": 0.4,
+      "long_share": 0.5,
+      "best_coin": "SOLUSDT",
+      "mean_net_pct_without_best": -0.19823458565594543
+    }
+  },
+  "D": {
+    "params": {
+      "k": 4,
+      "H": 288
+    },
+    "is": {
+      "n": 7540,
+      "trades_per_day": 8.267543859649123,
+      "mean_net_pct": -0.041766636846940694,
+      "t_nw": 1.011753513570404,
+      "days_with_trades": 868,
+      "days_pos_share": 0.5034562211981567,
+      "months_pos_share": 0.4666666666666667,
+      "long_share": 0.5944297082228117,
+      "best_coin": "INJUSDT",
+      "mean_net_pct_without_best": -0.0634496303953643
+    }
+  },
+  "E": {
+    "params": {
+      "q": 0.995,
+      "H": 48
+    },
+    "is": {
+      "n": 7947,
+      "trades_per_day": 8.713815789473685,
+      "mean_net_pct": -0.18173787952517853,
+      "t_nw": -4.8922993845993705,
+      "days_with_trades": 874,
+      "days_pos_share": 0.35812356979405036,
+      "months_pos_share": 0.03333333333333333,
+      "long_share": 0.49653957468227006,
+      "best_coin": "WLDUSDT",
+      "mean_net_pct_without_best": -0.18723248266351633
+    }
+  },
+  "G": {
+    "params": {
+      "N": 55,
+      "ls": false
+    },
+    "is": {
+      "n": 910,
+      "trades_per_day": 0.9978070175438597,
+      "mean_net_pct": 1.2769664745590197,
+      "t_nw": -0.01623416635900809,
+      "days_with_trades": 344,
+      "days_pos_share": 0.30523255813953487,
+      "months_pos_share": 0.36666666666666664,
+      "long_share": 1.0,
+      "best_coin": "APTUSDT",
+      "mean_net_pct_without_best": 0.956586600941232
+    }
+  },
+  "I": {
+    "params": {
+      "k": 8,
+      "H": 3
+    },
+    "is": {
+      "n": 5594,
+      "trades_per_day": 6.133771929824562,
+      "mean_net_pct": 0.06995738665334837,
+      "t_nw": -0.4715584238882172,
+      "days_with_trades": 742,
+      "days_pos_share": 0.5121293800539084,
+      "months_pos_share": 0.5666666666666667,
+      "long_share": 0.6192348945298534,
+      "best_coin": "APTUSDT",
+      "mean_net_pct_without_best": 0.05981608962104503
+    }
+  },
+  "B": {
+    "params": {
+      "z": 3,
+      "y": 0.02,
+      "H": 48
+    },
+    "is": {
+      "n": 4409,
+      "trades_per_day": 4.834429824561403,
+      "mean_net_pct": 0.211097600146805,
+      "t_nw": 1.3969419569883668,
+      "days_with_trades": 743,
+      "days_pos_share": 0.522207267833109,
+      "months_pos_share": 0.6333333333333333,
+      "long_share": 0.7691086414152869,
+      "best_coin": "OPUSDT",
+      "mean_net_pct_without_best": 0.19792614502058664
+    }
+  },
+  "F": {
+    "params": {
+      "k": 3,
+      "H": 288
+    },
+    "is": {
+      "n": 948,
+      "trades_per_day": 1.0394736842105263,
+      "mean_net_pct": -0.4039846571706591,
+      "t_nw": -0.9912023416246366,
+      "days_with_trades": 374,
+      "days_pos_share": 0.44385026737967914,
+      "months_pos_share": 0.4,
+      "long_share": 0.2320675105485232,
+      "best_coin": "TIAUSDT",
+      "mean_net_pct_without_best": -0.44296537995098373
+    }
+  },
+  "H": {
+    "params": {
+      "y": 0.06,
+      "z": 2,
+      "H": 48
+    },
+    "is": {
+      "n": 1169,
+      "trades_per_day": 1.281798245614035,
+      "mean_net_pct": -0.11830378615037787,
+      "t_nw": -1.413796163803743,
+      "days_with_trades": 581,
+      "days_pos_share": 0.4079173838209983,
+      "months_pos_share": 0.36666666666666664,
+      "long_share": 0.8520102651839179,
+      "best_coin": "OGNUSDT",
+      "mean_net_pct_without_best": -0.24140864379627153
+    }
+  }
+}
