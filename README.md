@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/%F0%9F%9A%A7%20BAUSTELLE-nicht%20live-orange?style=for-the-badge" alt="Baustelle – nicht live">
+</p>
+
+> 🚧 **Baustelle:** Dieser Bot ist aktuell **nicht live** und wird weiterentwickelt.
+
 # 1mbot — Forschung mit nachweisbarem Edge, aktuell: Upbit-Listing-Short (Dry-Run)
 
 Neustart Oktober 2026. Der alte Grid/Market-Making-Bot ist archiviert
