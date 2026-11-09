@@ -69,7 +69,7 @@ def l2_net(k, t0, p) -> float:
     if oe.empty or ox.empty:
         return float("nan")
     e, x = float(oe.iloc[0]), float(ox.iloc[0])
-    return (e * (1 - COST_SIDE)) / (x * (1 + COST_SIDE)) - 1      # Short
+    return 1 - x / e - COST_SIDE * (1 + x / e)      # linearer USDT-Short (Korrektur 09.11.2026, vorher invers)
 
 
 def evaluate(ev: pd.DataFrame, hyp: str, p: dict) -> pd.DataFrame:

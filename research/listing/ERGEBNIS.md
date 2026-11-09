@@ -1,5 +1,25 @@
 # Ergebnis Upbit-KRW-Listing (2026-10-10)
 
+> **KORREKTUR 09.11.2026 — gilt vor allen Zahlen unten.** Ein unabhängiges Codex-Review (evobot,
+> `CODEX_REVIEW_RESEARCH.md`) fand einen Formelfehler. Die Short-Rendite war `entry/exit − 1` und damit die eines
+> **inversen** Kontrakts. Bitget-USDT-Perps sind aber **linear**: `1 − exit/entry − c·(1 + exit/entry)`
+> (`rules.linear_short`). Die alte Formel überschätzt Gewinne und deckelt Squeeze-Verluste: Bei Kursverdopplung
+> gab sie −50 % statt −100 %. Neu gerechnet mit unveränderter präregistrierter Auswahl (E 30 min, H 72 h); die alten
+> Dateien liegen als `*_inverse_2026-10-10.*` daneben:
+>
+> | L2 | alt (invers) | **korrekt (linear)** |
+> |---|---:|---:|
+> | OOS netto je Ereignis (n 79) | +15,0 %, t 4,45 | **+6,12 %, t 1,77 → nicht bestanden** (Schwelle 2,24) |
+> | OOS inkl. Funding | +9,3 % | **+0,28 %** (Median +6,0 %) |
+> | IS inkl. Funding | +7,3 % | +2,62 % |
+> | 3x / Stop +15 % auf Margin, OOS | +11,8 %, t 1,40 | **−0,36 %, t −0,06** |
+>
+> **Fazit neu: Die KRW-Listing-Short-Nische hat nach Funding und Umsetzung keinen Vorteil.** Der scheinbare Edge
+> kam aus gedeckelten Squeeze-Verlusten. Der Papier-Wächter rechnet ab diesem Stand korrekt. Bereits
+> geschlossene Papier-Trades vor dem Update sind mit der alten Formel gebucht.
+> Übertragung auf **Nicht-KRW**-Listings (nur BTC/USDT-Markt), eigene Präregistrierung evobot evo-004, besteht
+> auch linear: +7,48 % je Cluster, t 4,22; Funding dort nur −0,3 %, Pumps klein.
+
 Präregistrierung: PRAEREGISTRIERUNG.md (sha256 6774eaf3…764c). 216 KRW-Listing-Ankündigungen
 (2021–2026). Davon haben 131 einen Binance-USDT-M-Perp, der vor T aktiv war. IS 50 / OOS 81.
 

@@ -1,0 +1,34 @@
+{
+  "L1": {
+    "params": {
+      "D": 180,
+      "H": 1800
+    },
+    "oos": {
+      "n_events": 81,
+      "n_cluster": 81,
+      "mean_net_pct": 0.7635469838748247,
+      "median_net_pct": 0.47647319400647703,
+      "t": 0.9078492904958165,
+      "share_pos": 0.5432098765432098,
+      "mean_without_best_pct": 0.23007961278848618
+    },
+    "BESTANDEN": false
+  },
+  "L2": {
+    "params": {
+      "E": 30,
+      "H": 4320
+    },
+    "oos": {
+      "n_events": 79,
+      "n_cluster": 79,
+      "mean_net_pct": 15.030694838509678,
+      "median_net_pct": 10.804877889392062,
+      "t": 4.450156885372493,
+      "share_pos": 0.7468354430379747,
+      "mean_without_best_pct": 13.650446107921521
+    },
+    "BESTANDEN": true
+  }
+}

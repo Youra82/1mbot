@@ -196,7 +196,7 @@ class Watcher:
                highs: np.ndarray, now: datetime) -> None:
         exit_ask = tick["ask"] if tick else None
         if why == "time":
-            raw = rules.LEVERAGE * ((o["entry_bid"] - exit_ask) / o["entry_bid"] - 2 * FEE_SIDE + fund)
+            raw = rules.LEVERAGE * (rules.linear_short(o["entry_bid"], exit_ask, FEE_SIDE) + fund)
         else:
             raw = r                          # Stop/Liquidation: gleiche konservative Annahme wie Backtest
         r, raw = max(r, -1.0), max(raw, -1.0)

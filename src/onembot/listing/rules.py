@@ -40,6 +40,15 @@ def bitget_symbol_candidates(ticker: str) -> list[str]:
     return [f"{ticker}USDT", f"1000{ticker}USDT", f"1000000{ticker}USDT"]
 
 
+def linear_short(entry: float, exit_price: float, cost_side: float = COST_SIDE) -> float:
+    """Rendite eines linearen USDT-Shorts (feste Kontraktmenge) auf den Einstiegs-Nominalwert, nach Gebuehren.
+
+    Korrektur 09.11.2026 (Codex-Review): vorher entry/exit - 1 = Rendite eines INVERSEN Kontrakts; das ueberschaetzt
+    Gewinne und deckelt Squeeze-Verluste (Kurs x2 -> -50 % statt -100 %).
+    """
+    return 1 - exit_price / entry - cost_side * (1 + exit_price / entry)
+
+
 def short_return_on_margin(entry: float, highs: np.ndarray, exit_price: float, funding_short: float,
                            lev: float = LEVERAGE, stop: float | None = STOP,
                            cost_side: float = COST_SIDE,
@@ -60,7 +69,7 @@ def short_return_on_margin(entry: float, highs: np.ndarray, exit_price: float, f
         if rel[i] >= liq and liq <= trig:
             return -1.0, "liq", i
         f = funding_until_stop if funding_until_stop is not None else i / max(len(highs), 1) * funding_short
-        loss = -(trig + STOP_SLIPPAGE) - 2 * cost_side + f
+        fill = trig + STOP_SLIPPAGE
+        loss = -fill - cost_side * (2 + fill) + f
         return max(lev * loss, -1.0), "stop", i
-    gross = (entry * (1 - cost_side)) / (exit_price * (1 + cost_side)) - 1
-    return max(lev * (gross + funding_short), -1.0), "time", -1
+    return max(lev * (linear_short(entry, exit_price, cost_side) + funding_short), -1.0), "time", -1

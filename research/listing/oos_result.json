@@ -23,12 +23,12 @@
     "oos": {
       "n_events": 79,
       "n_cluster": 79,
-      "mean_net_pct": 15.030694838509678,
-      "median_net_pct": 10.804877889392062,
-      "t": 4.450156885372493,
+      "mean_net_pct": 6.115974725110545,
+      "median_net_pct": 9.72591226321037,
+      "t": 1.77360069469469,
       "share_pos": 0.7468354430379747,
-      "mean_without_best_pct": 13.650446107921521
+      "mean_without_best_pct": 5.489880817383529
     },
-    "BESTANDEN": true
+    "BESTANDEN": false
   }
 }

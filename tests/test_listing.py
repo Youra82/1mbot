@@ -35,14 +35,20 @@ def test_duplicate_window():
 
 def test_short_return_time_exit():
     r, why, _ = rules.short_return_on_margin(100.0, np.array([101.0, 105.0]), 90.0, 0.0)
-    gross = (100 * (1 - rules.COST_SIDE)) / (90 * (1 + rules.COST_SIDE)) - 1
+    gross = 1 - 0.9 - rules.COST_SIDE * 1.9                     # linearer USDT-Short
     assert why == "time" and abs(r - 3 * gross) < 1e-12
+
+
+def test_linear_short_squeeze_not_capped():
+    # Kurs verdoppelt sich: linearer Short verliert 100 % des Nominals (invers waere nur -50 %)
+    assert abs(rules.linear_short(100.0, 200.0, 0.0) + 1.0) < 1e-12
+    assert abs(rules.linear_short(100.0, 50.0, 0.0) - 0.5) < 1e-12   # Halbierung: +50 % (invers: +100 %)
 
 
 def test_short_return_stop_and_liq():
     r, why, i = rules.short_return_on_margin(100.0, np.array([110.0, 116.0, 140.0]), 90.0, 0.0)
     assert why == "stop" and i == 1
-    assert abs(r - 3 * (-(0.15 + 0.01) - 2 * rules.COST_SIDE)) < 1e-12
+    assert abs(r - 3 * (-0.16 - rules.COST_SIDE * 2.16)) < 1e-12
     # ohne Stop bei 3x: Liquidation ab +32 %
     r, why, _ = rules.short_return_on_margin(100.0, np.array([110.0, 133.0]), 90.0, 0.0, stop=None)
     assert (r, why) == (-1.0, "liq")
@@ -50,7 +56,7 @@ def test_short_return_stop_and_liq():
 
 def test_short_return_live_funding_until_stop():
     r, _, _ = rules.short_return_on_margin(100.0, np.array([116.0]), np.nan, 0.0, funding_until_stop=-0.02)
-    assert abs(r - 3 * (-(0.16) - 2 * rules.COST_SIDE - 0.02)) < 1e-12
+    assert abs(r - 3 * (-0.16 - rules.COST_SIDE * 2.16 - 0.02)) < 1e-12
 
 
 # ---------------- Waechter mit Fake-Boersen ----------------
