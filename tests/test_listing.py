@@ -118,6 +118,32 @@ def test_old_notices_not_traded_on_first_start():
     assert w.s["pending"] == [] and "KAIA" in w.s["last_seen_ticker"]
 
 
+def test_bootstrap_survives_throttled_later_pages():
+    """Upbit-429 auf Seite 2: Start mit Seite 1 statt Absturz (sonst systemd-Neustart-Schleife, die die Sperre haelt)."""
+    class Throttled(FakeUpbit):
+        def notices(self, page=1):
+            if page > 1:
+                raise RuntimeError("429 Too Many Requests")
+            return super().notices(page)
+    up, bg, clk = Throttled(), FakeBitget(), Clock(T0)
+    up.items = [{"id": 1, "title": "카이아(KAIA) 신규 거래지원 안내 (KRW 마켓)", "T": T0 - timedelta(hours=2)}]
+    w = Watcher(new_state(100.0), up, bg, {"margin_fraction": 0.2}, now=clk, sleep=lambda s: None)
+    w.bootstrap()
+    assert w.s["bootstrapped"] and "KAIA" in w.s["last_seen_ticker"]
+
+
+def test_bootstrap_page1_failure_raises_for_retry():
+    class Down(FakeUpbit):
+        def notices(self, page=1):
+            raise RuntimeError("429 Too Many Requests")
+    w = Watcher(new_state(100.0), Down(), FakeBitget(), {"margin_fraction": 0.2}, now=Clock(T0), sleep=lambda s: None)
+    try:
+        w.bootstrap()
+        raise AssertionError("Seite-1-Fehler muss gemeldet werden (run_forever wartet und versucht erneut)")
+    except RuntimeError:
+        assert not w.s["bootstrapped"]
+
+
 def test_full_cycle_time_exit_with_funding():
     w, up, bg, clk = _setup()
     up.items.append({"id": 10, "title": "카이아(KAIA) 신규 거래지원 안내 (KRW, BTC, USDT 마켓)", "T": T0})

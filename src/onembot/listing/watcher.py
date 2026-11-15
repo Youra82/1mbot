@@ -66,8 +66,16 @@ class Watcher:
         now = self.now()
         for page in range(1, 6):
             if page > 1:
-                self.sleep(1.5)                                  # Upbit drosselt schnelle Folgeabfragen
-            for n in self.upbit.notices(page):
+                self.sleep(3.0)                                  # Upbit drosselt schnelle Folgeabfragen
+            try:
+                notices = self.upbit.notices(page)
+            except Exception as ex:
+                if page == 1:
+                    raise                                        # ohne Seite 1 kein Start (run_forever wartet)
+                # Seite 1 (neueste Ankuendigungen) reicht zum Start; aeltere Seiten fuellen nur das Dubletten-Gedaechtnis
+                log.warning("Bootstrap: Seite %d nicht abrufbar (%r) – starte mit %d Seite(n)", page, ex, page - 1)
+                break
+            for n in notices:
                 if n["T"] + rules.ENTRY_DELAY < now:          # zu alt zum Handeln
                     self.s["seen_notice_ids"].append(n["id"])
                     if rules.is_krw_listing(n["title"]):
@@ -247,7 +255,19 @@ def run_forever(settings: dict, notify: Callable[[str], None]) -> None:
     path = cfg["state_file"]
     state = load_state(path, cfg["start_equity"])
     w = Watcher(state, Upbit(), Bitget(), cfg, notify)
-    w.bootstrap()
+    save_state(path, state)                      # Papierkonto sofort anlegen (Cockpit), auch wenn Upbit noch drosselt
+    gemeldet = False
+    while True:                                  # Upbit-Drosselung (429) beim ersten Einlesen: warten statt abstuerzen –
+        try:                                     # ein Absturz liesse systemd alle 10 s neu starten und haelt die Sperre
+            w.bootstrap()
+            break
+        except Exception as ex:
+            log.warning("Bootstrap fehlgeschlagen (%r) – neuer Versuch in 2 min", ex)
+            if not gemeldet:
+                notify(f"1mbot: Upbit antwortet noch nicht ({ex!r:.120}) – versuche es alle 2 Minuten erneut")
+                gemeldet = True
+            save_state(path, state)
+            time.sleep(120)
     save_state(path, state)
     notify("1mbot Listing-Waechter gestartet (Dry-Run, keine echten Orders)\n" + w.summary())
     last_check, last_daily, fail_since, warned = 0.0, None, None, False

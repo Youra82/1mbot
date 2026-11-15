@@ -22,7 +22,12 @@ def _get(url: str, params: dict | None = None, retries: int = 4) -> dict:
         r = requests.get(url, params=params, headers=HDR, timeout=15)
         if r.status_code == 429 or r.status_code >= 500:
             if attempt < retries:
-                time.sleep(2 ** (attempt + 1))
+                wait = 2 ** (attempt + 1)
+                try:                                      # Server-Vorgabe (Upbit/Cloudflare) beachten, max. 60 s
+                    wait = max(wait, min(60, int(r.headers.get("Retry-After", 0))))
+                except ValueError:
+                    pass
+                time.sleep(wait)
                 continue
         r.raise_for_status()
         return r.json()
