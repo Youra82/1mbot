@@ -11,8 +11,9 @@ git reset --hard origin/main
 
 if [ -f secret.json.bak ]; then cp secret.json.bak secret.json; rm secret.json.bak; fi
 
-find . -type f -name "*.pyc" -delete
-find . -type d -name "__pycache__" -delete
+sudo chown -R "$(id -un)":"$(id -gn)" .          # falls der Dienst frueher als root lief
+find . -type f -name "*.pyc" -delete 2>/dev/null || true
+find . -type d -name "__pycache__" -delete 2>/dev/null || true
 chmod +x *.sh
 
 .venv/bin/pip install -r requirements.txt --quiet
