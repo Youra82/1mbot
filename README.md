@@ -80,17 +80,52 @@ Der 1mbot handelt **nur auf Papier** (echte Bitget-Kurse und echtes Bitget-Fundi
 und wird alle 10 Sekunden gespeichert; das **Cockpit** zeigt es unter „Papierkonten“ (Kontostand, offene Papier-Shorts
 mit Stop und Ausstiegszeit, letzte Trades).
 
-## Bedienung (VPS)
+## Installation (MiniPC / VPS)
+
+Voraussetzung: Linux mit Python 3.10+ und `python3-venv` (`sudo apt install python3-venv`), Benutzer mit `sudo`.
 
 ```bash
-./update.sh                       # bzw. ./install.sh bei Erstinstallation
-sudo systemctl start 1mbot.service
-./show_results.sh
-tail -f logs/listing.log
+git clone https://github.com/Youra82/1mbot.git ~/1mbot
+cd ~/1mbot
+./install.sh                      # .venv, Pakete, Ordner logs/ und data/, systemd-Dienst 1mbot.service eintragen
 ```
 
-`secret.json` braucht nur den Block `telegram`. Es werden keine API-Keys benötigt, alles läuft
-über öffentliche Endpunkte. Ist `live_trading` auf true gesetzt, bricht der Start ab.
+1. **`secret.json` anlegen** (nur für Telegram-Meldungen, nicht versioniert; ohne Datei läuft der Bot still):
+   ```bash
+   cp secret.json.example secret.json
+   nano secret.json
+   ```
+   ```json
+   {
+       "telegram": {"bot_token": "...", "chat_id": "..."}
+   }
+   ```
+   Bitget- oder Upbit-Schlüssel braucht der 1mbot nicht – er nutzt nur öffentliche Endpunkte.
+2. **`settings.json` prüfen:** `"mode": "listing"` und `"echtgeld": {"aktiv": false}` (Standard).
+   `papier_startkapital` legt das Startkapital eines neuen Papierkontos fest (Standard 100 USDT).
+3. **Starten:**
+   ```bash
+   sudo systemctl start 1mbot.service
+   systemctl status 1mbot --no-pager | head -3   # erwartet: active (running)
+   ```
+   Telegram meldet „1mbot Listing-Waechter gestartet (Dry-Run, keine echten Orders)“.
+
+**Kein Cronjob nötig:** Der 1mbot ist ein systemd-Dienst (`Restart=always`) – er startet nach einem Absturz nach
+10 Sekunden und nach einem Neustart des Rechners von selbst. Das Cockpit findet ihn automatisch, wenn der Ordner neben
+dem Cockpit liegt (z. B. `~/1mbot` und `~/cockpit`), und zeigt ihn unter „Papierkonten“.
+
+## Bedienung
+
+| Befehl | Was er tut |
+|---|---|
+| `./show_results.sh` | Papierkonto, offene/wartende/geschlossene Papier-Shorts |
+| `tail -f logs/listing.log` | laufendes Protokoll (erkannte Listings, Einstiege, Stops) |
+| `sudo systemctl restart 1mbot.service` | neu starten (z. B. nach Änderung der `settings.json`) |
+| `sudo systemctl stop 1mbot.service` | anhalten |
+| `./update.sh` | neue Version holen; `secret.json` und `data/` (Papierkonto) bleiben, Dienst wird neu gestartet |
+
+Ist `echtgeld.aktiv` (oder das alte `capital.live_trading`) auf `true` gesetzt, bricht der Start ab: der 1mbot hat
+keine Order-Funktionen.
 
 ## Weitere Werkzeuge
 
