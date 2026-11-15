@@ -32,9 +32,13 @@ def main() -> None:
         settings = json.load(f)
     if args.data_dir:
         settings["data_dir"] = args.data_dir
-    if settings["capital"].get("live_trading"):
-        # Phase 1 kennt keine Orders -- ein versehentlich gesetztes Flag soll laut scheitern
-        sys.exit("live_trading=true, aber 1mbot kennt noch keine echten Orders. Abbruch.")
+    echtgeld = settings.get("echtgeld") or {}
+    if echtgeld.get("aktiv") or settings["capital"].get("live_trading"):
+        # 1mbot kennt keine Orders -- ein versehentlich gesetzter Schalter soll laut scheitern
+        sys.exit("echtgeld.aktiv=true, aber 1mbot kennt keine echten Orders (nur Papierhandel). "
+                 "In settings.json \"echtgeld\": {\"aktiv\": false} setzen. Abbruch.")
+    if "papier_startkapital" in echtgeld:      # Startkapital eines NEUEN Papierkontos (bestehendes bleibt)
+        settings["listing"]["start_equity"] = float(echtgeld["papier_startkapital"])
 
     os.makedirs("logs", exist_ok=True)
     logging.basicConfig(

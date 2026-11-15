@@ -1,4 +1,9 @@
 {
+    "echtgeld": {
+        "aktiv": false,
+        "papier_startkapital": 100,
+        "_info": "1mbot handelt nur auf Papier (echte Bitget-Kurse, keine Orders, kein Schlüssel). true wird abgelehnt, weil 1mbot keine Order-Funktionen hat. Das Cockpit zeigt das Papierkonto aus data/listing_state.json."
+    },
     "mode": "listing",
     "data_dir": "data",
     "universe": {

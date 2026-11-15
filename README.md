@@ -72,6 +72,14 @@ für Mehrfachtests. Von 13 Ideen hat eine bestanden:
 Jedes Verzeichnis enthält `PRAEREGISTRIERUNG.md` (mit SHA-256) und `ERGEBNIS.md`. Die Backtests
 sperren OOS, solange keine IS-Auswahl gespeichert ist.
 
+## Papierhandel und Cockpit
+
+`settings.json` → `"echtgeld": {"aktiv": false, "papier_startkapital": 100}` – wie bei evobot, jaegerbot und zockerbot.
+Der 1mbot handelt **nur auf Papier** (echte Bitget-Kurse und echtes Bitget-Funding, keine Orders, kein Schlüssel);
+`"aktiv": true` wird abgelehnt, weil er keine Order-Funktionen hat. Das Papierkonto liegt in `data/listing_state.json`
+und wird alle 10 Sekunden gespeichert; das **Cockpit** zeigt es unter „Papierkonten“ (Kontostand, offene Papier-Shorts
+mit Stop und Ausstiegszeit, letzte Trades).
+
 ## Bedienung (VPS)
 
 ```bash
