@@ -209,3 +209,43 @@ def test_ticker_failure_keeps_pending_without_duplicates():
     w.enter_due()
     w.enter_due()
     assert len(w.s["pending"]) == 0 and len(w.s["open"]) == 1
+
+
+def test_late_exit_after_outage_uses_price_at_exit_time():
+    """Ausfall ueber den 72-h-Ausstieg hinaus: Spitze NACH dem Ausstieg darf keinen Stop ausloesen, Kurs = Ausstiegszeit."""
+    w, up, bg, clk = _setup()
+    up.items.append({"id": 15, "title": "카이아(KAIA) 신규 거래지원 안내 (KRW 마켓)", "T": T0})
+    w.poll_upbit()
+    clk.t = T0 + timedelta(minutes=30)
+    w.enter_due()
+    o = w.s["open"][0]
+    exit_ms = _ms(datetime.fromisoformat(o["exit_at"])) // 60_000 * 60_000
+    start = o["last_candle_ms"]
+    bg.candles = [(t, 1.02, 0.90) for t in range(start, exit_ms, 60_000)]
+    bg.candles += [(exit_ms, 1.0, 0.85), (exit_ms + 60_000, 1.50, 1.40)]   # nach dem Ausstieg: Squeeze
+    bg.ask = 1.45
+    clk.t = datetime.fromisoformat(o["exit_at"]) + timedelta(days=1)
+    w.check_open()
+    c = w.s["closed"][0]
+    assert c["reason"] == "time" and c["exit_late"] and c["exit_ask"] == 0.85
+    assert c["ret_margin_backtest_costs"] > 0
+
+
+def test_bitget_candles_fill_gap_longer_than_1000_minutes(monkeypatch):
+    """Bitget ohne endTime: nur die letzten 1000 Minuten; mit endTime: startTime exklusiv (beides real geprueft)."""
+    from onembot.listing import exchange
+    now_ms = 1_800_000_000_000 // 60_000 * 60_000
+    monkeypatch.setattr(exchange.time, "time", lambda: now_ms / 1000 + 20)
+    all_ts = list(range(now_ms - 3000 * 60_000, now_ms + 60_000, 60_000))
+
+    def fake_data(self, path, **p):
+        st, lim = int(p["startTime"]), int(p["limit"])
+        if "endTime" in p:
+            ts = [t for t in all_ts if st < t <= int(p["endTime"])][:lim]
+        else:
+            ts = [t for t in all_ts if t >= st][-lim:]
+        return [[str(t), "1", str(t % 7 + 2), "0.5", "1", "0"] for t in ts]
+    monkeypatch.setattr(exchange.Bitget, "_data", fake_data)
+    start = now_ms - 2000 * 60_000
+    got = exchange.Bitget().candles_1m("X", start)
+    assert [c[0] for c in got] == [t for t in all_ts if t >= start]

@@ -178,10 +178,13 @@ class Watcher:
     def _check_one(self, o: dict, now: datetime) -> bool:
         candles = self.bitget.candles_1m(o["symbol"], o["last_candle_ms"])
         cur_min = _ms(now) // 60_000 * 60_000
-        done = [c for c in candles if o["last_candle_ms"] <= c[0] < cur_min]
-        partial = [c[1] for c in candles if c[0] >= cur_min][:1]   # laufende Minute: Stop greift sofort
+        exit_ms = _ms(_dt(o["exit_at"]))
+        end_ms = min(cur_min, exit_ms)          # nach Ausfall: nur Hochs bis zum planmaessigen Ausstieg zaehlen
+        done = [c for c in candles if o["last_candle_ms"] <= c[0] < end_ms]
+        partial = [c[1] for c in candles if c[0] >= cur_min][:1] if cur_min < exit_ms else []  # laufende Minute
         highs = np.array(o["highs"] + [c[1] for c in done] + partial, dtype=float)
-        fund = self.funding_since(o, now)
+        late = now - _dt(o["exit_at"]) > timedelta(minutes=5)
+        fund = self.funding_since(o, _dt(o["exit_at"]) if late else now)
         if len(highs):
             r, why, _ = rules.short_return_on_margin(o["entry_bid"], highs, float("nan"), 0.0,
                                                      funding_until_stop=fund)
@@ -189,7 +192,11 @@ class Watcher:
                 self._close(o, r, why, None, fund, highs, now)
                 return True
         if now >= _dt(o["exit_at"]):
-            tick = self.bitget.ticker(o["symbol"])
+            at_exit = [c for c in candles if c[0] >= exit_ms // 60_000 * 60_000][:1]
+            if late and at_exit:                # verspaetet (Ausfall): Kurs zum Ausstiegszeitpunkt statt heutiger Ask
+                tick = {"ask": at_exit[0][2], "bid": at_exit[0][2], "late": True}
+            else:
+                tick = self.bitget.ticker(o["symbol"])
             r, _, _ = rules.short_return_on_margin(o["entry_bid"], highs if len(highs) else np.array([o["entry_bid"]]),
                                                    tick["ask"], fund)
             self._close(o, r, "time", tick, fund, highs, now)
@@ -212,6 +219,7 @@ class Watcher:
         self.s["equity"] += pnl
         c = {k: v for k, v in o.items() if k != "highs"}
         c.update(close_time=_iso(now), reason=why, exit_ask=exit_ask, funding_short=fund,
+                 exit_late=bool(tick and tick.get("late")),
                  ret_margin_backtest_costs=r, ret_margin_raw_fees=raw, pnl_usdt=pnl,
                  equity_after=self.s["equity"],
                  max_rise_pct=float((highs.max() / o["entry_bid"] - 1) * 100) if len(highs) else 0.0)

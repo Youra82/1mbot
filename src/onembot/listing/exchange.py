@@ -62,9 +62,27 @@ class Bitget:
                 "ask_sz": float(t["askSz"]), "last": float(t["lastPr"]), "funding_rate": float(t["fundingRate"])}
 
     def candles_1m(self, symbol: str, start_ms: int) -> list[tuple[int, float, float]]:
-        """(open_time, high, open) ab start_ms, aufsteigend; die letzte Kerze kann noch offen sein."""
-        rows = self._data("candles", symbol=symbol, granularity="1m", startTime=str(start_ms), limit="1000")
-        return sorted((int(r[0]), float(r[2]), float(r[1])) for r in rows)
+        """(open_time, high, open) ab start_ms, aufsteigend; die letzte Kerze kann noch offen sein.
+
+        Bitget liefert ohne endTime nur die LETZTEN 1000 Minuten, egal wie alt startTime ist (geprueft 21.11.2026).
+        Nach einem Ausfall > ~16 h fehlten sonst Hochs still (verpasster Stop). Deshalb aeltere Abschnitte in
+        1000-Minuten-Fenstern mit endTime laden; mit endTime zaehlt startTime exklusiv -> eine Minute frueher fragen.
+        """
+        out: dict[int, tuple[float, float]] = {}
+        s = start_ms
+        while int(time.time() * 1000) - s > 900 * 60_000:
+            rows = self._data("candles", symbol=symbol, granularity="1m", startTime=str(s - 60_000),
+                              endTime=str(s + 999 * 60_000), limit="1000")
+            ts = [int(r[0]) for r in rows]
+            for r in rows:
+                if int(r[0]) >= s:
+                    out[int(r[0])] = (float(r[2]), float(r[1]))
+            s = max(ts) + 60_000 if ts and max(ts) >= s else s + 1000 * 60_000
+        rows = self._data("candles", symbol=symbol, granularity="1m", startTime=str(s), limit="1000")
+        for r in rows:
+            if int(r[0]) >= start_ms:
+                out[int(r[0])] = (float(r[2]), float(r[1]))
+        return sorted((t, h, o) for t, (h, o) in out.items())
 
     def funding_history(self, symbol: str) -> list[tuple[int, float]]:
         rows = self._data("history-fund-rate", symbol=symbol, pageSize="100")
